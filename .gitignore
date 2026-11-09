@@ -1,0 +1,28 @@
+# Local docs & AI context (not versioned)
+/CLAUDE.md
+/local/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+
+# Rust
+/target/
+**/*.rs.bk
+
+# Node / JS build output
+node_modules/
+packages/*/dist/
+packages/*/wasm/
+
+# Test data (fixtures, conformance) — local only for now (ADR #12). Regenerate: cargo run -p quelda-testkit --bin gen-fixtures
+/tests/
+
+# Private PDF corpus (real customer files, incident samples) — never commit
+/corpus/
+
+# Fuzzing artifacts
+/fuzz/target/
+/fuzz/artifacts/
+/fuzz/corpus/
