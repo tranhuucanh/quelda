@@ -1,0 +1,31 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/quelda-core",
+    "crates/quelda-wasm",
+    "crates/quelda-cli",
+    "crates/quelda-testkit",
+]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT OR Apache-2.0"
+authors = ["The quelda authors"]
+description = "PDF security scanner: one PDF + policy in, verdict out"
+
+[workspace.dependencies]
+quelda-core = { path = "crates/quelda-core", version = "0.0.0" }
+
+# Native CLI binary.
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+
+# WASM for the npm package: optimize for size (budget: design §8).
+[profile.release-wasm]
+inherits = "release"
+opt-level = "z"
+panic = "abort"

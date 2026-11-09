@@ -1,0 +1,14 @@
+{
+  "name": "quelda",
+  "version": "0.0.0",
+  "description": "PDF security scanner (WebAssembly): one PDF + policy in, verdict out",
+  "license": "MIT OR Apache-2.0",
+  "private": true,
+  "type": "module",
+  "keywords": [
+    "pdf",
+    "security",
+    "scanner",
+    "webassembly"
+  ]
+}
