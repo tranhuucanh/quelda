@@ -97,22 +97,43 @@ impl fmt::Display for LexError {
     }
 }
 
+const WHITESPACE: u8 = 1;
+const DELIMITER: u8 = 2;
+
+/// Byte classes (one lookup on the hot paths).
+static CLASS: [u8; 256] = {
+    let mut t = [0u8; 256];
+    let ws: [u8; 6] = [0, b'\t', b'\n', 0x0C, b'\r', b' '];
+    let mut i = 0;
+    while i < ws.len() {
+        t[ws[i] as usize] = WHITESPACE;
+        i += 1;
+    }
+    let delim = *b"()<>[]{}/%";
+    let mut i = 0;
+    while i < delim.len() {
+        t[delim[i] as usize] = DELIMITER;
+        i += 1;
+    }
+    t
+};
+
 /// PDF whitespace (Table 1): NUL, TAB, LF, FF, CR, SPACE.
+#[inline]
 pub fn is_whitespace(b: u8) -> bool {
-    matches!(b, 0 | b'\t' | b'\n' | 0x0C | b'\r' | b' ')
+    CLASS[usize::from(b)] == WHITESPACE
 }
 
 /// PDF delimiters (Table 2).
+#[inline]
 pub fn is_delimiter(b: u8) -> bool {
-    matches!(
-        b,
-        b'(' | b')' | b'<' | b'>' | b'[' | b']' | b'{' | b'}' | b'/' | b'%'
-    )
+    CLASS[usize::from(b)] == DELIMITER
 }
 
 /// Neither whitespace nor delimiter.
+#[inline]
 pub fn is_regular(b: u8) -> bool {
-    !is_whitespace(b) && !is_delimiter(b)
+    CLASS[usize::from(b)] == 0
 }
 
 fn hex_val(b: u8) -> Option<u8> {
@@ -255,16 +276,22 @@ impl<'a> Lexer<'a> {
 
     fn regular_run(&mut self) -> &'a [u8] {
         let start = self.pos;
-        while self.peek().is_some_and(is_regular) {
-            self.pos += 1;
-        }
-        &self.data[start..self.pos]
+        let rest = self.data.get(start..).unwrap_or_default();
+        let n = rest
+            .iter()
+            .position(|&b| !is_regular(b))
+            .unwrap_or(rest.len());
+        self.pos = start + n;
+        &rest[..n]
     }
 
     /// After `/`: name bytes up to whitespace/delimiter, `#xx` decoded.
     /// A `#` not followed by two hex digits is kept literally.
     fn name(&mut self) -> Name {
         let run = self.regular_run();
+        if !run.contains(&b'#') {
+            return Name::from_slice(run);
+        }
         let mut out = Vec::with_capacity(run.len());
         let mut i = 0;
         while let Some(&b) = run.get(i) {
@@ -401,6 +428,9 @@ fn number(run: &[u8]) -> Option<Token<'static>> {
     if digits == 0 || dots > 1 {
         return None;
     }
+    if let Some(tok) = small_number(run, body) {
+        return Some(tok);
+    }
     // Only ASCII digits, sign and dot here, so this is valid UTF-8.
     let s = std::str::from_utf8(run).ok()?;
     if dots == 0 {
@@ -412,9 +442,119 @@ fn number(run: &[u8]) -> Option<Token<'static>> {
     s.parse::<f64>().ok().map(Token::Real)
 }
 
+/// Exact fast path of [`number`] for a well-formed `body` (sign stripped)
+/// with at most 15 digits: integers fit an `i64`, and a real is
+/// `digits / 10^frac` with both operands exact in `f64` (≤ 2^53, ≤ 10^22),
+/// so the one division is correctly rounded — the same bits `str::parse`
+/// gives. Anything longer goes the slow way.
+fn small_number(run: &[u8], body: &[u8]) -> Option<Token<'static>> {
+    const POW10: [f64; 16] = [
+        1e0, 1e1, 1e2, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9, 1e10, 1e11, 1e12, 1e13, 1e14, 1e15,
+    ];
+    if body.len() > 16 {
+        return None;
+    }
+    let mut mantissa: i64 = 0;
+    let mut frac: Option<usize> = None;
+    for (i, &b) in body.iter().enumerate() {
+        if b == b'.' {
+            frac = Some(body.len() - i - 1);
+        } else {
+            mantissa = mantissa * 10 + i64::from(b - b'0');
+        }
+    }
+    let negative = run.first() == Some(&b'-');
+    match frac {
+        None => Some(Token::Int(if negative { -mantissa } else { mantissa })),
+        Some(f) => {
+            let x = mantissa as f64 / POW10.get(f)?;
+            Some(Token::Real(if negative { -x } else { x }))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Before Step 16: every number through `str::parse`.
+    fn number_oracle(run: &[u8]) -> Option<Token<'static>> {
+        let body = match run.first() {
+            Some(b'+' | b'-') => &run[1..],
+            _ => run,
+        };
+        let digits = body.iter().filter(|b| b.is_ascii_digit()).count();
+        let dots = body.iter().filter(|&&b| b == b'.').count();
+        if digits == 0 || dots > 1 || digits + dots != body.len() {
+            return None;
+        }
+        let s = std::str::from_utf8(run).ok()?;
+        if dots == 0 {
+            if let Ok(i) = s.parse::<i64>() {
+                return Some(Token::Int(i));
+            }
+        }
+        s.parse::<f64>().ok().map(Token::Real)
+    }
+
+    #[test]
+    fn byte_classes() {
+        for b in 0..=255u8 {
+            let ws = matches!(b, 0 | b'\t' | b'\n' | 0x0C | b'\r' | b' ');
+            let delim = b"()<>[]{}/%".contains(&b);
+            assert_eq!(is_whitespace(b), ws, "{b}");
+            assert_eq!(is_delimiter(b), delim, "{b}");
+            assert_eq!(is_regular(b), !ws && !delim, "{b}");
+        }
+    }
+
+    #[test]
+    fn number_fast_path_is_exact() {
+        let mut x = 0x9E37_79B9_7F4A_7C15u64;
+        let mut next = || {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            x
+        };
+        for _ in 0..200_000 {
+            let len = (next() % 22) as usize;
+            let mut run: Vec<u8> = (0..len)
+                .map(|_| match next() % 14 {
+                    0 => b'.',
+                    1 => b'-',
+                    2 => b'+',
+                    d => b'0' + (d % 10) as u8,
+                })
+                .collect();
+            if next() % 3 == 0 && !run.is_empty() {
+                run.retain(|&b| b != b'-' && b != b'+');
+            }
+            let (got, want) = (number(&run), number_oracle(&run));
+            match (&got, &want) {
+                (Some(Token::Real(a)), Some(Token::Real(b))) => {
+                    assert_eq!(
+                        a.to_bits(),
+                        b.to_bits(),
+                        "{:?}",
+                        String::from_utf8_lossy(&run)
+                    )
+                }
+                _ => assert_eq!(got, want, "{:?}", String::from_utf8_lossy(&run)),
+            }
+        }
+        for s in [
+            "-0",
+            "-.0",
+            "+.5",
+            "5.",
+            "999999999999999.9",
+            "0.000000000000001",
+            "9007199254740993",
+        ] {
+            assert_eq!(number(s.as_bytes()), number_oracle(s.as_bytes()), "{s}");
+        }
+    }
 
     fn toks(src: &[u8]) -> Vec<Token<'_>> {
         let mut lx = Lexer::new(src);

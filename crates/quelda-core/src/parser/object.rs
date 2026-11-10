@@ -33,46 +33,107 @@ impl fmt::Display for ObjRef {
 }
 
 /// A name with `#xx` escapes decoded. Stored as bytes: names are byte strings
-/// and may be invalid UTF-8; compare with `name == "JS"`.
-#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
-pub struct Name(Vec<u8>);
+/// and may be invalid UTF-8; compare with `name == "JS"`. Names of up to
+/// [`INLINE_NAME`] bytes (nearly all of them) live inline, without a heap
+/// allocation.
+#[derive(Clone)]
+pub struct Name(NameRepr);
+
+/// Longest name stored inline (keeps `Name` as small as a `Vec`).
+const INLINE_NAME: usize = 22;
+
+#[derive(Clone)]
+enum NameRepr {
+    Inline(u8, [u8; INLINE_NAME]),
+    Heap(Box<[u8]>),
+}
 
 impl Name {
     pub fn new(bytes: Vec<u8>) -> Self {
-        Name(bytes)
+        if bytes.len() <= INLINE_NAME {
+            Name::from_slice(&bytes)
+        } else {
+            Name(NameRepr::Heap(bytes.into_boxed_slice()))
+        }
+    }
+
+    pub fn from_slice(bytes: &[u8]) -> Self {
+        let mut buf = [0u8; INLINE_NAME];
+        match buf.get_mut(..bytes.len()) {
+            Some(head) => {
+                head.copy_from_slice(bytes);
+                Name(NameRepr::Inline(bytes.len() as u8, buf))
+            }
+            None => Name(NameRepr::Heap(bytes.into())),
+        }
     }
 
     pub fn as_bytes(&self) -> &[u8] {
-        &self.0
+        match &self.0 {
+            NameRepr::Inline(len, buf) => &buf[..usize::from(*len)],
+            NameRepr::Heap(b) => b,
+        }
     }
 
     /// The name as text, if it is valid UTF-8.
     pub fn as_str(&self) -> Option<&str> {
-        std::str::from_utf8(&self.0).ok()
+        std::str::from_utf8(self.as_bytes()).ok()
+    }
+}
+
+impl Default for Name {
+    fn default() -> Self {
+        Name::from_slice(b"")
+    }
+}
+
+impl PartialEq for Name {
+    fn eq(&self, other: &Self) -> bool {
+        self.as_bytes() == other.as_bytes()
+    }
+}
+
+impl Eq for Name {}
+
+impl std::hash::Hash for Name {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.as_bytes().hash(state);
+    }
+}
+
+impl PartialOrd for Name {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Name {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.as_bytes().cmp(other.as_bytes())
     }
 }
 
 impl From<&str> for Name {
     fn from(s: &str) -> Self {
-        Name(s.as_bytes().to_vec())
+        Name::from_slice(s.as_bytes())
     }
 }
 
 impl PartialEq<str> for Name {
     fn eq(&self, other: &str) -> bool {
-        self.0 == other.as_bytes()
+        self.as_bytes() == other.as_bytes()
     }
 }
 
 impl PartialEq<&str> for Name {
     fn eq(&self, other: &&str) -> bool {
-        self.0 == other.as_bytes()
+        self.as_bytes() == other.as_bytes()
     }
 }
 
 impl fmt::Debug for Name {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "/{}", String::from_utf8_lossy(&self.0))
+        write!(f, "/{}", String::from_utf8_lossy(self.as_bytes()))
     }
 }
 
@@ -86,7 +147,7 @@ pub struct Dict {
 
 impl Dict {
     pub fn new(entries: Vec<(Name, PdfObject)>) -> Self {
-        let has_duplicate_keys = !duplicates(&entries).is_empty();
+        let has_duplicate_keys = has_duplicates(&entries);
         Dict {
             entries,
             has_duplicate_keys,
@@ -134,6 +195,17 @@ impl Dict {
         }
         duplicates(&self.entries)
     }
+}
+
+/// Small dictionaries (nearly all) are compared pairwise, without allocating.
+fn has_duplicates(entries: &[(Name, PdfObject)]) -> bool {
+    if entries.len() > 16 {
+        return !duplicates(entries).is_empty();
+    }
+    entries
+        .iter()
+        .enumerate()
+        .any(|(i, (k, _))| entries[i + 1..].iter().any(|(k2, _)| k == k2))
 }
 
 /// O(n log n): sort key references, report equal neighbours.
@@ -198,7 +270,8 @@ pub enum PdfObject {
     Name(Name),
     Array(Vec<PdfObject>),
     Dict(Dict),
-    Stream(PdfStream),
+    /// Boxed: streams are few, and this keeps every other value small.
+    Stream(Box<PdfStream>),
     Ref(ObjRef),
 }
 
@@ -375,7 +448,7 @@ mod tests {
             data: 10..10,
             length: StreamLength::Declared,
         };
-        let so = PdfObject::Stream(s.clone());
+        let so = PdfObject::Stream(Box::new(s.clone()));
         assert_eq!(so.as_dict(), Some(&s.dict));
         assert_eq!(so.as_stream(), Some(&s));
         assert_eq!(so.type_name(), "stream");

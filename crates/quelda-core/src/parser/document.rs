@@ -11,13 +11,13 @@
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 
-use super::linear_scan::object_candidates;
 use super::object::{Dict, ObjRef, PdfObject, PdfStream, StreamLength};
 use super::objstm::parse_members;
 use super::parse::{
     ParseError, object_header_at, parse_indirect_object_extent, parse_object_extent,
     stream_data_with_length,
 };
+use super::raw_scan::{RawScan, Signature};
 use super::structure::Structure;
 use super::xref::{EntryKind, XrefKind, XrefProblem, XrefSection, parse_stream_rows, parse_table};
 use crate::error::{EngineIssue, IssueCode};
@@ -171,6 +171,8 @@ pub struct Facts {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Document {
     pub structure: Structure,
+    /// Foreign-format signatures anywhere in the file (polyglot facts).
+    pub signatures: Vec<Signature>,
     /// Every xref section found, in discovery order.
     pub sections: Vec<XrefSection>,
     /// Revisions in file order (by xref section offset).
@@ -188,13 +190,15 @@ impl Document {
     /// Builds the union object set. Never fails: damage becomes facts, and
     /// whatever could not be inspected becomes an issue.
     pub fn parse(src: &[u8], limits: &Limits, budget: &mut Budget) -> Document {
+        let raw = RawScan::scan(src);
         let mut b = Builder {
             src,
             limits,
             budget,
             work: Work::new(src.len()),
             doc: Document {
-                structure: Structure::scan(src),
+                structure: raw.structure,
+                signatures: raw.signatures,
                 sections: Vec::new(),
                 revisions: Vec::new(),
                 trailers: Vec::new(),
@@ -209,7 +213,7 @@ impl Document {
             full: false,
             issued: HashSet::new(),
         };
-        b.linear_scan();
+        b.linear_scan(raw.object_candidates);
         b.resolve_lengths();
         b.load_sections();
         b.objects_from_xref_offsets();
@@ -373,8 +377,8 @@ impl<'a> Builder<'a, '_> {
         }
     }
 
-    fn linear_scan(&mut self) {
-        for offset in object_candidates(self.src) {
+    fn linear_scan(&mut self, candidates: Vec<usize>) {
+        for offset in candidates {
             if self.full || self.out_of_work() {
                 break;
             }
@@ -388,7 +392,7 @@ impl<'a> Builder<'a, '_> {
     /// the longest wins (inspect the most bytes).
     fn resolve_lengths(&mut self) {
         let src = self.src;
-        let mut updates: Vec<(usize, PdfStream, bool)> = Vec::new();
+        let mut updates: Vec<(usize, Box<PdfStream>, bool)> = Vec::new();
         for (i, e) in self.doc.objects.iter().enumerate() {
             let PdfObject::Stream(s) = &e.object else {
                 continue;
@@ -1060,12 +1064,12 @@ mod tests {
     fn same_content_compares_stream_bytes_not_positions() {
         let src = b"abcXabc";
         let stream = |r: std::ops::Range<usize>| {
-            PdfObject::Stream(PdfStream {
+            PdfObject::Stream(Box::new(PdfStream {
                 dict: Dict::default(),
                 data_start: r.start,
                 data: r,
                 length: StreamLength::Declared,
-            })
+            }))
         };
         assert!(same_content(src, &stream(0..3), &stream(4..7)));
         assert!(!same_content(src, &stream(0..3), &stream(3..6)));

@@ -398,7 +398,18 @@ pub struct CodeModule {
     /// Absolute path, for `#[path]`.
     pub path: String,
     pub rules: Vec<String>,
+    /// Hooks the file defines, `[check_file, check_dict, check_content_op,
+    /// check_document]`: the engine calls only these (a name merely mentioned
+    /// counts too, which only costs a call).
+    pub hooks: [bool; 4],
 }
+
+const HOOKS: [&str; 4] = [
+    "fn check_file",
+    "fn check_dict",
+    "fn check_content_op",
+    "fn check_document",
+];
 
 /// Rule types implemented in `src`: every `impl Rule for X`.
 pub fn find_rule_impls(src: &str) -> Vec<String> {
@@ -461,6 +472,7 @@ pub fn code_module(
         module: module.to_string(),
         path: path.to_string(),
         rules,
+        hooks: HOOKS.map(|h| src.contains(h)),
     }))
 }
 
@@ -558,8 +570,15 @@ pub fn generate(rules: &[RuleSpec], code: &[CodeModule]) -> String {
     out.push_str("pub(crate) static ALL: &[&dyn crate::rules::Rule] = &[\n");
     for (category, modules) in &by_category {
         for m in modules {
+            let [file, dict, content_op, document] = m.hooks;
             for r in &m.rules {
-                let _ = writeln!(out, "    &{category}::{}::{r},", m.module);
+                let _ = writeln!(
+                    out,
+                    "    &crate::rules::Hooked {{ rule: &{category}::{}::{r}, hooks: \
+                     crate::rules::Hooks {{ file: {file}, dict: {dict}, content_op: {content_op}, \
+                     document: {document} }} }},",
+                    m.module
+                );
             }
         }
     }
@@ -882,6 +901,13 @@ match = { dict = { key = "S", name = "Launch" } }
             .unwrap();
         assert_eq!(m.module, "x_y");
         assert_eq!(m.rules, vec!["X"]);
+        assert_eq!(m.hooks, [false; 4]);
+        let both =
+            "impl Rule for X {\n    fn check_dict(&self) {}\n    fn check_document(&self) {}\n}";
+        let m = code_module("filetype", "x.rs", "/a", both)
+            .unwrap()
+            .unwrap();
+        assert_eq!(m.hooks, [false, true, false, true]);
         assert_eq!(code_module("filetype", "README.md", "/a", src), Ok(None));
         let e = code_module("active", "x.rs", "/a", src).unwrap_err();
         assert!(
@@ -924,6 +950,7 @@ match = { dict = { key = "S", name = "Launch" } }
             module: "not_pdf_header".into(),
             path: "/abs/not_pdf_header.rs".into(),
             rules: vec!["NotPdfHeader".into()],
+            hooks: [true, false, false, false],
         }];
         let src = generate(&rules, &code);
         assert!(src.contains("pub(crate) mod filetype {\n    #[path = \"/abs/not_pdf_header.rs\"]\n    pub(crate) mod not_pdf_header;"), "{src}");
@@ -933,7 +960,7 @@ match = { dict = { key = "S", name = "Launch" } }
         );
         assert!(src.contains("matcher: crate::rules::declarative::Match::Dict(crate::rules::declarative::DictMatch::Name { key: \"S\", name: \"Launch\" })"), "{src}");
         assert!(
-            src.contains("    &filetype::not_pdf_header::NotPdfHeader,\n    &DECL_0,\n];"),
+            src.contains("    &crate::rules::Hooked { rule: &filetype::not_pdf_header::NotPdfHeader, hooks: crate::rules::Hooks { file: true, dict: false, content_op: false, document: false } },\n    &DECL_0,\n];"),
             "{src}"
         );
     }

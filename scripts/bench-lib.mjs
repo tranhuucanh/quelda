@@ -171,3 +171,21 @@ export function compare(a, b, labels = ['A', 'B']) {
   if (tb > 0) rows.push(`| **total** | ${ta.toFixed(1)} | ${tb.toFixed(1)} | ${(ta / tb).toFixed(2)} | | | | | ${mismatches} diff, ${missing} missing |`);
   return { text: rows.join('\n') + '\n', mismatches, missing };
 }
+
+/// Files of run `b` slower than in run `a` by more than `pct` percent
+/// (plan Step 16 / ADR #29 CI gate), on the fastest of the runs (`ms_min`,
+/// least noisy). Files under `minMs` in `a` are skipped (timer noise), as
+/// are files missing from either run. Returns `[{ file, before, after, pct }]`.
+export function regressions(a, b, pct, minMs = 20) {
+  const byFile = new Map(b.map((r) => [r.file, r]));
+  const out = [];
+  for (const ra of a) {
+    const rb = byFile.get(ra.file);
+    const before = ra.ms_min ?? ra.ms_median;
+    if (!rb || before < minMs) continue;
+    const after = rb.ms_min ?? rb.ms_median;
+    const slower = (after / before - 1) * 100;
+    if (slower > pct) out.push({ file: ra.file, before, after, pct: slower });
+  }
+  return out;
+}

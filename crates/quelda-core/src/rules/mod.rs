@@ -46,6 +46,63 @@ pub trait Rule: Sync {
     /// After the traversal: whole-document checks (counts, revisions,
     /// relations between objects).
     fn check_document(&self, _ctx: &Ctx, _out: &mut Findings) {}
+
+    /// The hooks the engine calls; the others are skipped (they are the
+    /// default no-ops). Code rules get this from `build.rs` ([`Hooked`]).
+    fn hooks(&self) -> Hooks {
+        Hooks::ALL
+    }
+}
+
+/// Which [`Rule`] hooks a rule implements.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Hooks {
+    pub file: bool,
+    pub dict: bool,
+    pub content_op: bool,
+    pub document: bool,
+}
+
+impl Hooks {
+    pub const ALL: Hooks = Hooks {
+        file: true,
+        dict: true,
+        content_op: true,
+        document: true,
+    };
+}
+
+/// A code rule with the hooks its file defines (generated registry).
+pub struct Hooked {
+    pub rule: &'static dyn Rule,
+    pub hooks: Hooks,
+}
+
+impl Rule for Hooked {
+    fn meta(&self) -> &'static RuleMeta {
+        self.rule.meta()
+    }
+    fn check_file(&self, raw: &[u8], out: &mut Findings) {
+        self.rule.check_file(raw, out);
+    }
+    fn check_dict(&self, dict: &Dict, loc: &Location, ctx: &Ctx, out: &mut Findings) {
+        self.rule.check_dict(dict, loc, ctx, out);
+    }
+    fn check_content_op(
+        &self,
+        op: &ContentOp<'_>,
+        loc: &OpLocation,
+        ctx: &Ctx,
+        out: &mut Findings,
+    ) {
+        self.rule.check_content_op(op, loc, ctx, out);
+    }
+    fn check_document(&self, ctx: &Ctx, out: &mut Findings) {
+        self.rule.check_document(ctx, out);
+    }
+    fn hooks(&self) -> Hooks {
+        self.hooks
+    }
 }
 
 /// Where a finding is.
@@ -168,16 +225,17 @@ impl Findings {
     }
 }
 
-/// Dispatches the single traversal to every rule.
+/// Dispatches the single traversal to the rules implementing each hook.
 struct Dispatch<'r, 'c, 'a> {
-    rules: &'r [&'r dyn Rule],
+    dict_rules: Vec<&'r dyn Rule>,
+    op_rules: Vec<&'r dyn Rule>,
     ctx: &'c Ctx<'a>,
     out: Findings,
 }
 
 impl Visitor for Dispatch<'_, '_, '_> {
     fn dict(&mut self, dict: &Dict, loc: &Location) {
-        for r in self.rules {
+        for r in &self.dict_rules {
             if self.out.stopped() {
                 return;
             }
@@ -186,7 +244,7 @@ impl Visitor for Dispatch<'_, '_, '_> {
     }
 
     fn content_op(&mut self, op: &ContentOp<'_>, loc: &OpLocation) {
-        for r in self.rules {
+        for r in &self.op_rules {
             if self.out.stopped() {
                 return;
             }
@@ -208,15 +266,23 @@ pub fn run(ctx: &Ctx, rules: &[&dyn Rule]) -> Findings {
 
 /// [`run`] into `out`; stops calling hooks once [`Findings::stopped`].
 pub fn run_into(ctx: &Ctx, rules: &[&dyn Rule], out: Findings) -> Findings {
-    let mut d = Dispatch { rules, ctx, out };
-    for r in rules {
+    let with = |hook: fn(Hooks) -> bool| -> Vec<&dyn Rule> {
+        rules.iter().copied().filter(|r| hook(r.hooks())).collect()
+    };
+    let mut d = Dispatch {
+        dict_rules: with(|h| h.dict),
+        op_rules: with(|h| h.content_op),
+        ctx,
+        out,
+    };
+    for r in with(|h| h.file) {
         if d.out.stopped() {
             return d.out;
         }
         r.check_file(ctx.raw(), &mut d.out);
     }
     ctx.walk(&mut d);
-    for r in rules {
+    for r in with(|h| h.document) {
         if d.out.stopped() {
             return d.out;
         }

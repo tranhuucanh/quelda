@@ -57,7 +57,12 @@ fn encoded_at(data: &[u8], at: usize, marker: &str, unit: usize, big_endian: boo
 
 /// The first DOCTYPE/ENTITY declaration in `data`: `(marker, encoding)`.
 fn find_declaration(data: &[u8]) -> Option<(&'static str, &'static str)> {
-    for (i, _) in data.iter().enumerate().filter(|&(_, &b)| b == b'<') {
+    for i in memchr::memchr_iter(b'<', data) {
+        // Both markers start `<!`: in every encoding the `!` byte is 1, 2
+        // or 4 bytes after this `<`.
+        if ![1, 2, 4].iter().any(|&d| data.get(i + d) == Some(&b'!')) {
+            continue;
+        }
         for (enc, unit, big_endian) in ENCODINGS {
             // Big endian: the `<` byte is the last of its code unit.
             let Some(start) = (if big_endian {
@@ -185,6 +190,48 @@ mod tests {
         let mut data = encode("<!DOCTYPE", 2, false);
         data[3] = 1;
         assert_eq!(find_declaration(&data), None);
+    }
+
+    /// Before Step 16: every encoding tried at every `<`.
+    fn find_declaration_oracle(data: &[u8]) -> Option<(&'static str, &'static str)> {
+        for (i, _) in data.iter().enumerate().filter(|&(_, &b)| b == b'<') {
+            for (enc, unit, big_endian) in ENCODINGS {
+                let Some(start) = (if big_endian {
+                    i.checked_sub(unit - 1)
+                } else {
+                    Some(i)
+                }) else {
+                    continue;
+                };
+                for marker in MARKERS {
+                    if encoded_at(data, start, marker, unit, big_endian) {
+                        return Some((marker, enc));
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    #[test]
+    fn same_as_oracle() {
+        let pieces: Vec<Vec<u8>> = ["<!DOCTYPE", "<!entity", "<!DOC", "<", "!", "x"]
+            .iter()
+            .flat_map(|m| [1, 2, 4].map(|u| [encode(m, u, false), encode(m, u, true)]))
+            .flatten()
+            .chain([vec![0], vec![0, 0, 0]])
+            .collect();
+        let mut x = 0x2545_F491_4F6C_DD1Du64;
+        for _ in 0..3000 {
+            let mut data = Vec::new();
+            for _ in 0..12 {
+                x ^= x << 13;
+                x ^= x >> 7;
+                x ^= x << 17;
+                data.extend_from_slice(&pieces[(x % pieces.len() as u64) as usize]);
+            }
+            assert_eq!(find_declaration(&data), find_declaration_oracle(&data), "{data:?}");
+        }
     }
 
     fn details(src: &[u8]) -> Vec<Option<String>> {

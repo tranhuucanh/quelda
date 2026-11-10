@@ -3,7 +3,7 @@
 //! codegen in `build_support/rules_codegen.rs`.
 
 use super::meta::RuleMeta;
-use super::{Findings, Rule};
+use super::{Findings, Hooks, Rule};
 use crate::facts::{ContentOp, Ctx, Location, OpLocation};
 use crate::parser::{Dict, PdfObject};
 
@@ -87,6 +87,16 @@ impl Rule for DeclRule {
     fn check_content_op(&self, op: &ContentOp<'_>, loc: &OpLocation, _: &Ctx, out: &mut Findings) {
         if matches!(self.matcher, Match::ContentOp(operator) if op.is(operator)) {
             out.report(self.meta, loc, None);
+        }
+    }
+
+    fn hooks(&self) -> Hooks {
+        let op = matches!(self.matcher, Match::ContentOp(_));
+        Hooks {
+            file: false,
+            dict: !op,
+            content_op: op,
+            document: false,
         }
     }
 }

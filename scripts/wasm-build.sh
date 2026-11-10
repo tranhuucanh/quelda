@@ -12,6 +12,9 @@
 #   wasm-opt      binaryen ≥ 116; override with WASM_OPT=/path/to/wasm-opt
 #   node          ≥ 18 (size check)
 # Set QUELDA_SKIP_BUDGET=1 to measure without failing on the budget.
+# Variants (plan Step 16): QUELDA_WASM_OPT=z|s|3 (rustc opt-level and
+# wasm-opt -O<level>, default from the release-wasm profile + -Oz),
+# QUELDA_WASM_SIMD=1 (rustc +simd128, wasm-opt --enable-simd).
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -31,8 +34,22 @@ command -v "$wasm_opt" >/dev/null || {
   exit 1
 }
 
+opt="${QUELDA_WASM_OPT:-}"
+wasm_opt_level="-O${opt:-z}"
+cargo_args=()
+if [[ -n "$opt" ]]; then
+  [[ "$opt" =~ ^[0-9]$ ]] || opt="\"$opt\""
+  cargo_args+=(--config "profile.release-wasm.opt-level=$opt")
+fi
+simd_args=()
+if [[ "${QUELDA_WASM_SIMD:-}" == 1 ]]; then
+  export RUSTFLAGS="${RUSTFLAGS:-} -C target-feature=+simd128"
+  simd_args+=(--enable-simd)
+fi
+
 cargo build --manifest-path "$root/Cargo.toml" -p quelda-wasm \
-  --target wasm32-unknown-unknown --profile release-wasm
+  --target wasm32-unknown-unknown --profile release-wasm \
+  "${cargo_args[@]+"${cargo_args[@]}"}"
 
 mkdir -p "$out"
 # The glue is ESM; lets plain Node import it (scripts/wasm-smoke.mjs).
@@ -42,9 +59,10 @@ wasm-bindgen --target web --out-dir "$out" --out-name quelda \
   "$target_dir/wasm32-unknown-unknown/release-wasm/quelda_wasm.wasm"
 
 # Features rustc's wasm32 target enables by default; wasm-opt must accept them.
-"$wasm_opt" -Oz --strip-debug --strip-producers \
+"$wasm_opt" "$wasm_opt_level" --strip-debug --strip-producers \
   --enable-bulk-memory --enable-nontrapping-float-to-int --enable-sign-ext \
   --enable-mutable-globals --enable-multivalue --enable-reference-types \
+  "${simd_args[@]+"${simd_args[@]}"}" \
   "$out/quelda_bg.wasm" -o "$out/quelda_bg.wasm"
 
 budget_args=()

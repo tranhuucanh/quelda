@@ -42,43 +42,10 @@ pub struct Structure {
 }
 
 impl Structure {
+    /// Scans `src` (see [`super::raw_scan`], which finds everything in one
+    /// pass; prefer it when the other offsets are needed too).
     pub fn scan(src: &[u8]) -> Structure {
-        let header_lines: Vec<usize> = find_all(src, b"%PDF-")
-            .filter(|&i| at_line_start(src, i))
-            .collect();
-        let header = find_all(src, b"%PDF-").next().map(|offset| Header {
-            offset,
-            version: src[offset + 5..]
-                .iter()
-                .take_while(|&&b| !is_whitespace(b))
-                .take(16)
-                .copied()
-                .collect(),
-        });
-        let startxrefs = find_all(src, b"startxref")
-            .filter(|&i| keyword_at(src, i, b"startxref"))
-            .map(|offset| StartXref {
-                offset,
-                target: int_after(src, offset + b"startxref".len()),
-            })
-            .collect();
-        let eofs: Vec<usize> = find_all(src, b"%%EOF").collect();
-        let trailing_bytes = eofs.last().map(|&e| src.len() - (e + b"%%EOF".len()));
-        let xref_tables = find_all(src, b"xref")
-            .filter(|&i| at_line_start(src, i) && keyword_at(src, i, b"xref"))
-            .collect();
-        let trailers = find_all(src, b"trailer")
-            .filter(|&i| keyword_at(src, i, b"trailer"))
-            .collect();
-        Structure {
-            header,
-            header_lines,
-            startxrefs,
-            eofs,
-            trailing_bytes,
-            xref_tables,
-            trailers,
-        }
+        super::raw_scan::RawScan::scan(src).structure
     }
 
     /// The `startxref` a reader starts from: the last one with a target.
@@ -87,7 +54,9 @@ impl Structure {
     }
 }
 
-/// Offsets of every occurrence of `needle` (overlapping allowed).
+/// Offsets of every occurrence of `needle` (overlapping allowed), byte by
+/// byte: the reference the one-pass scan is tested against.
+#[cfg(test)]
 pub(crate) fn find_all<'a>(hay: &'a [u8], needle: &'a [u8]) -> impl Iterator<Item = usize> + 'a {
     let first = needle.first().copied();
     hay.iter()
@@ -98,7 +67,7 @@ pub(crate) fn find_all<'a>(hay: &'a [u8], needle: &'a [u8]) -> impl Iterator<Ite
 }
 
 /// Start of file or right after CR/LF, with optional spaces/tabs before.
-fn at_line_start(src: &[u8], i: usize) -> bool {
+pub(crate) fn at_line_start(src: &[u8], i: usize) -> bool {
     let mut j = i;
     while j > 0 && matches!(src[j - 1], b' ' | b'\t' | 0) {
         j -= 1;
@@ -114,7 +83,7 @@ pub(crate) fn keyword_at(src: &[u8], i: usize, kw: &[u8]) -> bool {
 }
 
 /// Non-negative integer after whitespace/comments at `pos` (bounded look-ahead).
-fn int_after(src: &[u8], pos: usize) -> Option<usize> {
+pub(crate) fn int_after(src: &[u8], pos: usize) -> Option<usize> {
     let mut i = pos;
     let limit = pos.saturating_add(64).min(src.len());
     while i < limit && (is_whitespace(src[i]) || src[i] == b'%') {
