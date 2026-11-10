@@ -1,0 +1,26 @@
+# Declarative rules, category `forms` (design §5.4, §5.7).
+# Keys are matched after `#xx` decoding.
+
+[[rule]]
+id = "FORMS.XFA"
+category = "forms"
+severity = "high"
+default_action = "warn"
+locked = false
+stage = "stable"
+since = "0.1.0"
+message = "Document contains an XFA form"
+description = "A dictionary with an /XFA key (ISO 32000-1 §12.7.8, deprecated in PDF 2.0): an XML Forms Architecture form, with its own layout engine, XML parser and scripting (JavaScript, FormCalc), a large attack surface beyond the PDF itself."
+match = { dict = { key = "XFA" } }
+
+[[rule]]
+id = "FORMS.ACROFORM"
+category = "forms"
+severity = "low"
+default_action = "warn"
+locked = false
+stage = "stable"
+since = "0.1.0"
+message = "Document contains an interactive form (AcroForm)"
+description = "A dictionary with an /AcroForm key (ISO 32000-2 §12.7): fillable form fields. Common in legitimate documents, so balanced only warns (ADR #21); scripts and submit actions in forms are reported by their own rules."
+match = { dict = { key = "AcroForm" } }

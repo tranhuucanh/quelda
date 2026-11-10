@@ -203,6 +203,89 @@ pub const CASES: &[Case] = &[
         U,
         &[],
     ),
+    // Thresholds (design §4.5): the policy moves what RESOURCE.* and
+    // STRUCT.FILTER_CHAIN / STRUCT.TRAILING_DATA detect.
+    case(
+        "a0-image-strict",
+        "A0 page with an A0 @300dpi image passes strict (under every default threshold)",
+        "benign/a0-large-image.pdf",
+        r#"{"preset":"strict"}"#,
+        "PASS",
+        &[],
+        &[],
+    ),
+    case(
+        "image-threshold-raised",
+        "1e10 px image passes once max_image_pixels allows it",
+        "rules/RESOURCE.IMAGE_DIMENSIONS/bad/plain.pdf",
+        r#"{"thresholds":{"max_image_pixels":10000000000}}"#,
+        "PASS",
+        &[],
+        &[],
+    ),
+    case(
+        "image-threshold-lowered",
+        "a small image is rejected once max_image_pixels is below its size",
+        "benign/image-rgb-flate.pdf",
+        r#"{"thresholds":{"max_image_pixels":255}}"#,
+        "REJECT",
+        &["RESOURCE.IMAGE_DIMENSIONS"],
+        &[],
+    ),
+    case(
+        "page-size-threshold-lowered",
+        "A4 is rejected once max_page_side_pt is below 842",
+        MINIMAL,
+        r#"{"thresholds":{"max_page_side_pt":800}}"#,
+        "REJECT",
+        &["RESOURCE.PAGE_SIZE"],
+        &[],
+    ),
+    case(
+        "page-size-threshold-raised",
+        "a 100000 pt page passes once max_page_side_pt allows it",
+        "rules/RESOURCE.PAGE_SIZE/bad/plain.pdf",
+        r#"{"thresholds":{"max_page_side_pt":100000}}"#,
+        "PASS",
+        &[],
+        &[],
+    ),
+    case(
+        "page-count-threshold-lowered",
+        "three pages are rejected once max_pages is 2",
+        "benign/multipage-text.pdf",
+        r#"{"thresholds":{"max_pages":2}}"#,
+        "REJECT",
+        &["RESOURCE.PAGE_COUNT"],
+        &[],
+    ),
+    case(
+        "filter-chain-threshold-raised",
+        "three filters pass strict once max_filter_chain is 3",
+        "rules/STRUCT.FILTER_CHAIN/bad/three-filters.pdf",
+        r#"{"preset":"strict","thresholds":{"max_filter_chain":3}}"#,
+        "PASS",
+        &[],
+        &[],
+    ),
+    case(
+        "filter-chain-threshold-lowered",
+        "the common two-filter chain warns (balanced) once max_filter_chain is 1",
+        "benign/content-two-filters.pdf",
+        r#"{"thresholds":{"max_filter_chain":1}}"#,
+        "PASS",
+        &[],
+        &["STRUCT.FILTER_CHAIN"],
+    ),
+    case(
+        "trailing-threshold-lowered",
+        "512 NUL bytes after %%EOF are rejected in strict once max_trailing_bytes is 100",
+        "rules/STRUCT.TRAILING_DATA/good/zero-padding-512.pdf",
+        r#"{"preset":"strict","thresholds":{"max_trailing_bytes":100}}"#,
+        "REJECT",
+        &["STRUCT.TRAILING_DATA"],
+        &[],
+    ),
     case(
         "incremental-strict",
         "preset rule override: incremental update warns in strict",
@@ -411,9 +494,13 @@ mod tests {
                 assert!(f.exact, "{}: {} is not exact", c.name, c.file);
                 assert!(f.engine_error.is_none(), "{}", c.name);
             }
+            // `fires` is computed with the default thresholds.
+            let default_thresholds = !c.policy.contains("\"thresholds\"");
             for id in c.violations.iter().chain(c.warnings) {
                 assert!(rules::rule(id).is_some(), "{}: {id}", c.name);
-                assert!(f.fires.contains(id), "{}: {id} does not fire", c.name);
+                if default_thresholds {
+                    assert!(f.fires.contains(id), "{}: {id} does not fire", c.name);
+                }
             }
             let status_ok = match c.status {
                 "PASS" => c.violations.is_empty(),

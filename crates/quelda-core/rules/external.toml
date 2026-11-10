@@ -1,0 +1,62 @@
+# Declarative rules, category `external` (design §5.4, §5.7).
+# Names are matched after `#xx` decoding; indirect values are followed one level.
+
+[[rule]]
+id = "EXTERNAL.URI"
+category = "external"
+severity = "low"
+default_action = "warn"
+locked = false
+stage = "stable"
+since = "0.1.0"
+message = "Document links to an external URI"
+description = "A URI action (/S /URI, ISO 32000-2 §12.6.4.8): opens a web address when activated. Ordinary hyperlinks are common, so balanced only warns (ADR #21); phishing documents rely on them."
+match = { dict = { key = "S", name = "URI" } }
+
+[[rule]]
+id = "EXTERNAL.REMOTE_GOTO"
+category = "external"
+severity = "medium"
+default_action = "warn"
+locked = false
+stage = "stable"
+since = "0.1.0"
+message = "Document jumps to another (remote or embedded) document"
+description = "A remote or embedded go-to action (/S /GoToR or /S /GoToE, ISO 32000-2 §12.6.4.3, §12.6.4.4): opens another file, possibly over the network (UNC/SMB paths leak credentials), or an attachment."
+match = { dict = { key = "S", name_in = ["GoToR", "GoToE"] } }
+
+[[rule]]
+id = "EXTERNAL.SUBMIT_FORM"
+category = "external"
+severity = "medium"
+default_action = "warn"
+locked = false
+stage = "stable"
+since = "0.1.0"
+message = "Document can submit form data to a URL"
+description = "A submit-form action (/S /SubmitForm, ISO 32000-2 §12.7.6.2): sends field values (or the whole document) to a URL, a data exfiltration and phishing vector."
+match = { dict = { key = "S", name = "SubmitForm" } }
+
+[[rule]]
+id = "EXTERNAL.IMPORT_DATA"
+category = "external"
+severity = "medium"
+default_action = "warn"
+locked = false
+stage = "stable"
+since = "0.1.0"
+message = "Document imports form data from a file"
+description = "An import-data action (/S /ImportData, ISO 32000-2 §12.7.6.4): loads field values from an external FDF/XFDF file."
+match = { dict = { key = "S", name = "ImportData" } }
+
+[[rule]]
+id = "EXTERNAL.URL_FILESPEC"
+category = "external"
+severity = "medium"
+default_action = "warn"
+locked = false
+stage = "stable"
+since = "0.1.0"
+message = "File specification points at a URL"
+description = "A URL file specification (/FS /URL, ISO 32000-2 §7.11.5): the referenced file (an external stream, a remote document, a form data file…) is fetched from the network."
+match = { dict = { key = "FS", name = "URL" } }

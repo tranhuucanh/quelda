@@ -1,0 +1,50 @@
+# Declarative rules, category `embedded` (design §5.4, §5.7).
+# Names are matched after `#xx` decoding; indirect values are followed one level.
+
+[[rule]]
+id = "EMBED.EMBEDDED_FILE"
+category = "embedded"
+severity = "high"
+default_action = "block"
+locked = false
+stage = "stable"
+since = "0.1.0"
+message = "Document contains an embedded file"
+description = "An embedded file stream (/Type /EmbeddedFile), a file specification with an /EF (embedded file) entry, or an /EmbeddedFiles name tree (ISO 32000-2 §7.11.4). /Type is optional on embedded file streams, so /EF is checked too. Attachments can carry any payload (executables, scripts, other documents) that a user or a downstream tool may open."
+match = { dict = { any = [ { key = "Type", name = "EmbeddedFile" }, { key = "EF" }, { key = "EmbeddedFiles" } ] } }
+
+[[rule]]
+id = "EMBED.FILE_ATTACHMENT"
+category = "embedded"
+severity = "high"
+default_action = "block"
+locked = false
+stage = "stable"
+since = "0.1.0"
+message = "Document contains a file attachment annotation"
+description = "A file attachment annotation (/Subtype /FileAttachment, ISO 32000-2 §12.5.6.15): an icon on a page that opens an attached file."
+match = { dict = { key = "Subtype", name = "FileAttachment" } }
+
+[[rule]]
+id = "EMBED.RICH_MEDIA"
+category = "embedded"
+severity = "high"
+default_action = "block"
+locked = false
+stage = "stable"
+since = "0.1.0"
+message = "Document contains rich media (multimedia, 3D)"
+description = "/Subtype RichMedia, Movie, Sound, Screen or 3D (annotations, ISO 32000-2 §12.5.6, §13), or U3D / PRC (3D artwork streams, §13.6.3). Multimedia and 3D content is handled by large, rarely audited players and decoders (Flash, U3D/PRC parsers) with a long exploit history."
+match = { dict = { key = "Subtype", name_in = ["RichMedia", "Movie", "Sound", "Screen", "3D", "U3D", "PRC"] } }
+
+[[rule]]
+id = "EMBED.PORTFOLIO"
+category = "embedded"
+severity = "high"
+default_action = "block"
+locked = false
+stage = "stable"
+since = "0.1.0"
+message = "Document is a PDF Portfolio (collection)"
+description = "A dictionary with a /Collection key (ISO 32000-2 §12.3.5): a PDF Portfolio, a container whose real content is its embedded files, shown by the reader instead of (or before) the cover pages."
+match = { dict = { key = "Collection" } }

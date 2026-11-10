@@ -1648,8 +1648,511 @@ fn batch_a_variants() -> Vec<Fixture> {
     ]
 }
 
+/// A linearized one-page file: linearization dictionary first, then the
+/// first-page xref section whose trailer `/Prev` points forward at the main
+/// section; the last `startxref` points at the first-page section (ISO
+/// 32000-2 Annex F). `update`: plus one incremental update. Offsets are
+/// computed; the hint values are not meaningful (nothing reads them).
+fn linearized(update: bool) -> Vec<u8> {
+    let mut out = b"%PDF-1.7\n%\xE2\xE3\xCF\xD3\n".to_vec();
+    // Object offsets, indexed by number.
+    let mut offsets = [0usize; 7];
+    let obj = |out: &mut Vec<u8>, offsets: &mut [usize; 7], num: usize, body: &[u8]| {
+        offsets[num] = out.len();
+        out.extend_from_slice(format!("{num} 0 obj\n").as_bytes());
+        out.extend_from_slice(body);
+        out.extend_from_slice(b"\nendobj\n");
+    };
+    obj(
+        &mut out,
+        &mut offsets,
+        1,
+        b"<< /Linearized 1 /L 0 /H [0 0] /O 4 /E 0 /N 1 /T 0 >>",
+    );
+    let first_xref = out.len();
+    // `/Prev` placeholder: 10 digits, patched once the main section is written.
+    let prev_at = {
+        out.extend_from_slice(
+            format!(
+                "xref\n1 1\n{:010} 00000 n \ntrailer\n<< /Size 7 /Root 2 0 R /Prev ",
+                offsets[1]
+            )
+            .as_bytes(),
+        );
+        let at = out.len();
+        out.extend_from_slice(b"0000000000 >>\nstartxref\n0\n%%EOF\n");
+        at
+    };
+    obj(
+        &mut out,
+        &mut offsets,
+        2,
+        b"<< /Type /Catalog /Pages 3 0 R >>",
+    );
+    obj(
+        &mut out,
+        &mut offsets,
+        3,
+        b"<< /Type /Pages /Kids [4 0 R] /Count 1 /MediaBox [0 0 595 842] >>",
+    );
+    obj(
+        &mut out,
+        &mut offsets,
+        4,
+        b"<< /Type /Page /Parent 3 0 R /Resources << /Font << /F1 6 0 R >> >> /Contents 5 0 R >>",
+    );
+    obj(
+        &mut out,
+        &mut offsets,
+        5,
+        &raw_stream_body("", BASE_CONTENT),
+    );
+    obj(
+        &mut out,
+        &mut offsets,
+        6,
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    );
+    let main_xref = out.len();
+    out.extend_from_slice(b"xref\n0 1\n0000000000 65535 f \n2 5\n");
+    for o in &offsets[2..=6] {
+        out.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+    }
+    out.extend_from_slice(
+        format!("trailer\n<< /Size 7 /Root 2 0 R >>\nstartxref\n{first_xref}\n%%EOF\n").as_bytes(),
+    );
+    out[prev_at..prev_at + 10].copy_from_slice(format!("{main_xref:010}").as_bytes());
+    if update {
+        let at = out.len();
+        out.extend_from_slice(b"7 0 obj\n<< /Title (quelda update) >>\nendobj\n");
+        let x = out.len();
+        out.extend_from_slice(
+            format!(
+                "xref\n7 1\n{at:010} 00000 n \ntrailer\n<< /Size 8 /Root 2 0 R /Info 7 0 R /Prev {first_xref} >>\nstartxref\n{x}\n%%EOF\n"
+            )
+            .as_bytes(),
+        );
+    }
+    out
+}
+
+/// `pdf` plus a copy of its (first) xref table and trailer that no
+/// `startxref` or `/Prev` leads to.
+fn with_unreachable_section(pdf: Vec<u8>) -> Vec<u8> {
+    let find = |needle: &[u8]| pdf.windows(needle.len()).position(|w| w == needle);
+    let (Some(xref), Some(startxref)) = (find(b"\nxref\n"), find(b"startxref")) else {
+        panic!("no xref table");
+    };
+    let mut out = pdf.clone();
+    out.extend_from_slice(&pdf[xref + 1..startxref]);
+    out.extend_from_slice(format!("startxref\n{}\n%%EOF\n", xref + 1).as_bytes());
+    out
+}
+
+/// Batch B (Step 10) evasion variants and near-misses not covered above.
+fn batch_b_variants() -> Vec<Fixture> {
+    const EMBED: &str = "EMBED.EMBEDDED_FILE";
+    const RICH: &str = "EMBED.RICH_MEDIA";
+    const JBIG2: &str = "CODEC.JBIG2";
+    const JPX: &str = "CODEC.JPX";
+    const XML: &str = "XML.DOCTYPE";
+    const IMG: &str = "RESOURCE.IMAGE_DIMENSIONS";
+    const SIZE: &str = "RESOURCE.PAGE_SIZE";
+    const COUNT: &str = "RESOURCE.PAGE_COUNT";
+    const XREF: &str = "STRUCT.XREF_MISMATCH";
+    const CYCLE: &str = "STRUCT.PAGE_TREE_CYCLE";
+
+    let orphan = |objects: &[(u32, &str)]| {
+        let mut b = Doc::new().builder();
+        for (n, body) in objects {
+            b.object(*n, body);
+        }
+        b.build()
+    };
+    let inline = |dict: &str| {
+        let data = format!("q BI {dict} ID quelda-test EI Q\n");
+        content(&[BASE_CONTENT, data.as_bytes()].concat(), &[])
+    };
+    let image_with = |dict: &str, extra: &[(u32, &str)]| {
+        let mut d = Doc::new();
+        d.xobjects.push(("Im1", 10));
+        let mut b = d.builder();
+        b.stream_raw(
+            10,
+            &format!(
+                "/Type /XObject /Subtype /Image /ColorSpace /DeviceGray /BitsPerComponent 8 {dict}"
+            ),
+            b"quelda-test image bytes (not decoded)",
+        );
+        for (n, body) in extra {
+            b.object(*n, body);
+        }
+        b.build()
+    };
+    let utf16be = |data: &[u8]| -> Vec<u8> {
+        let mut v = vec![0xFE, 0xFF];
+        v.extend(data.iter().flat_map(|&b| [0, b]));
+        v
+    };
+    let page_tree_moved = {
+        let mut d = Doc::new();
+        d.kids = "7 0 R 8 0 R".into();
+        d.page_parent = 7;
+        let mut b = d.builder();
+        b.object(7, "<< /Type /Pages /Parent 2 0 R /Kids [3 0 R] /Count 1 >>")
+            .object(8, "<< /Type /Pages /Parent 2 0 R /Kids [] /Count 0 >>");
+        let mut moved = d.clone();
+        moved.page_parent = 8;
+        b.revision()
+            .object(7, "<< /Type /Pages /Parent 2 0 R /Kids [] /Count 0 >>")
+            .object(8, "<< /Type /Pages /Parent 2 0 R /Kids [3 0 R] /Count 1 >>")
+            .object(3, moved.page_body());
+        b.build()
+    };
+    let count_with = |count: &str, extra: &[(u32, &str)], catalog: &str| {
+        let mut d = Doc::new();
+        d.catalog_extra = catalog.to_string();
+        let pages = d
+            .pages_body()
+            .replace("/Count 1", &format!("/Count {count}"));
+        let mut b = PdfBuilder::new(d.version);
+        b.object(1, d.catalog_body())
+            .object(2, pages)
+            .object(3, d.page_body())
+            .stream(4, "", BASE_CONTENT, &[])
+            .object(5, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+        for (n, body) in extra {
+            b.object(*n, body);
+        }
+        b.build()
+    };
+
+    vec![
+        bad(
+            EMBED,
+            "ef-without-type",
+            {
+                let mut b = Doc::new().builder();
+                b.object(
+                    11,
+                    "<< /Type /Filespec /F (quelda-test.txt) /EF << /F 10 0 R >> >>",
+                )
+                .stream(10, "", b"quelda-test\n", &[]);
+                b.build()
+            },
+            &[],
+            "File spec /EF pointing at a stream without /Type /EmbeddedFile (optional)",
+        ),
+        good(
+            EMBED,
+            "ef-in-string",
+            page_note("/QueldaNote (/EF << /F 10 0 R >>)"),
+            &[],
+            "String",
+        ),
+        bad(
+            RICH,
+            "subtype-u3d",
+            {
+                let mut b = Doc::new().builder();
+                b.stream(10, "/Type /3D /Subtype /U3D", b"quelda-test u3d bytes", &[]);
+                b.build()
+            },
+            &[],
+            "3D artwork stream (U3D)",
+        ),
+        bad(
+            RICH,
+            "subtype-prc",
+            {
+                let mut b = Doc::new().builder();
+                b.stream(10, "/Type /3D /Subtype /PRC", b"quelda-test prc bytes", &[]);
+                b.build()
+            },
+            &[],
+            "3D artwork stream (PRC)",
+        ),
+        bad(
+            JBIG2,
+            "filter-indirect-array",
+            image_with(
+                "/Width 8 /Height 8 /Filter 30 0 R",
+                &[(30, "[/FlateDecode /JBIG2Decode]")],
+            ),
+            &[],
+            "/Filter is a reference to an array",
+        ),
+        bad(
+            JBIG2,
+            "filter-array-indirect-element",
+            image_with(
+                "/Width 8 /Height 8 /Filter [/FlateDecode 30 0 R]",
+                &[(30, "/JBIG2Decode")],
+            ),
+            &[],
+            "/Filter array whose second element is a reference",
+        ),
+        bad(
+            JBIG2,
+            "inline-image",
+            inline("/W 8 /H 8 /IM true /F /JBIG2Decode"),
+            &[],
+            "Inline image naming JBIG2Decode",
+        ),
+        good(
+            JBIG2,
+            "globals-without-filter",
+            image_with(
+                "/Width 8 /Height 8 /Filter /FlateDecode /DecodeParms << /JBIG2Globals 20 0 R >>",
+                &[(20, "<< /QueldaNote (not a stream) >>")],
+            ),
+            &[],
+            "/JBIG2Globals in /DecodeParms, but no JBIG2Decode filter",
+        ),
+        bad(
+            JPX,
+            "filter-array",
+            image_with("/Width 8 /Height 8 /Filter [/JPXDecode]", &[]),
+            &[],
+            "/Filter given as a one-element array",
+        ),
+        bad(
+            JPX,
+            "inline-image",
+            inline("/W 8 /H 8 /CS /G /BPC 8 /F /JPXDecode"),
+            &[],
+            "Inline image naming JPXDecode",
+        ),
+        bad(
+            XML,
+            "utf16",
+            metadata_doc(&utf16be(XMP_DOCTYPE), &[]).build(),
+            &[],
+            "XMP packet in UTF-16BE (with BOM)",
+        ),
+        bad(
+            XML,
+            "lowercase",
+            metadata_doc(&XMP_DOCTYPE.to_ascii_lowercase(), &[]).build(),
+            &[],
+            "<!doctype in lower case",
+        ),
+        bad(
+            XML,
+            "xfa-indirect-array",
+            {
+                let mut d = Doc::new();
+                d.catalog_extra = "/AcroForm << /Fields [] /XFA 30 0 R >>".into();
+                let mut b = d.builder();
+                b.object(30, "[(template) 20 0 R]")
+                    .stream(20, "", XMP_DOCTYPE, &[]);
+                b.build()
+            },
+            &[ACROFORM, XFA],
+            "/XFA is a reference to the packet array",
+        ),
+        good(
+            XML,
+            "doctype-in-content",
+            content(
+                &[
+                    BASE_CONTENT,
+                    b"BT /F1 12 Tf 72 700 Td (<!DOCTYPE quelda>) Tj ET\n",
+                ]
+                .concat(),
+                &[],
+            ),
+            &[],
+            "<!DOCTYPE as page text",
+        ),
+        good(
+            XML,
+            "embedded-html",
+            {
+                let mut b = Doc::new().builder();
+                b.stream(
+                    10,
+                    "/Type /EmbeddedFile",
+                    b"<!DOCTYPE quelda><p>quelda-test</p>\n",
+                    &[],
+                );
+                b.build()
+            },
+            &[EMBED],
+            "Attachment with a DOCTYPE: not parsed as XML by the reader",
+        ),
+        bad(
+            CHAIN,
+            "abbreviated-repeat",
+            {
+                let mut b = Doc::new().builder();
+                b.stream_raw(
+                    10,
+                    "/Filter [/Fl /FlateDecode]",
+                    &encode_chain(&[Filter::Flate, Filter::Flate], b"q Q\n"),
+                );
+                b.build()
+            },
+            &[],
+            "/Fl and /FlateDecode are the same filter",
+        ),
+        bad(
+            CHAIN,
+            "indirect-array",
+            {
+                let mut b = Doc::new().builder();
+                b.stream_raw(10, "/Filter 30 0 R", &encode_chain(&CHAIN3, b"q Q\n"))
+                    .object(30, "[/ASCII85Decode /ASCIIHexDecode /FlateDecode]");
+                b.build()
+            },
+            &[],
+            "Three filters through a referenced array",
+        ),
+        bad(
+            CHAIN,
+            "inline-image",
+            inline("/W 2 /H 1 /CS /G /BPC 8 /F [/AHx /AHx]"),
+            &[],
+            "Inline image with the same filter twice",
+        ),
+        good(
+            CHAIN,
+            "plain-dict",
+            page_note("/QueldaNest << /Filter [/A85 /AHx /Fl] >>"),
+            &[],
+            "Filter array on a dictionary that is not a stream",
+        ),
+        bad(
+            IMG,
+            "abbreviated-keys",
+            image_with("/W 100000 /H 100000", &[]),
+            // A stream with /W is also read as a (broken) xref stream, as a
+            // lenient reader at `startxref` would: one more revision.
+            &[XREF, INCR],
+            "Image XObject sized with /W /H (pdf.js reads them)",
+        ),
+        bad(
+            IMG,
+            "indirect-subtype",
+            {
+                let mut d = Doc::new();
+                d.xobjects.push(("Im1", 10));
+                let mut b = d.builder();
+                b.stream_raw(
+                    10,
+                    "/Type /XObject /Subtype 30 0 R /Width 100000 /Height 100000 /ColorSpace /DeviceGray /BitsPerComponent 8",
+                    &[0u8; 16],
+                )
+                .object(30, "/Image");
+                b.build()
+            },
+            &[],
+            "/Subtype /Image through a reference",
+        ),
+        good(
+            IMG,
+            "not-an-image",
+            page_note("/QueldaNote << /Width 100000 /Height 100000 >>"),
+            &[],
+            "Width/Height on a dictionary that is not an image",
+        ),
+        bad(
+            SIZE,
+            "trimbox",
+            page_note("/TrimBox [0 0 50000 50000]"),
+            &[],
+            "Huge TrimBox (Ghostscript -dUseTrimBox)",
+        ),
+        bad(
+            SIZE,
+            "array-element-indirect",
+            {
+                let mut d = Doc::new();
+                d.page_extra = "/MediaBox [0 0 30 0 R 842]".into();
+                let mut b = d.builder();
+                b.object(30, "100000");
+                b.build()
+            },
+            &[],
+            "MediaBox element is a reference to 100000",
+        ),
+        good(
+            SIZE,
+            "form-bbox",
+            {
+                let mut d = Doc::new();
+                d.xobjects.push(("Fx", 10));
+                let mut b = d.builder();
+                b.stream(
+                    10,
+                    "/Type /XObject /Subtype /Form /BBox [0 0 100000 100000]",
+                    b"0 0 m 1 1 l S\n",
+                    &[],
+                );
+                b.build()
+            },
+            &[],
+            "Large Form XObject /BBox is not a page box",
+        ),
+        bad(
+            COUNT,
+            "indirect-value",
+            count_with("30 0 R", &[(30, "1000000")], ""),
+            &[],
+            "/Count is a reference to 1000000",
+        ),
+        bad(
+            COUNT,
+            "orphan-pages-node",
+            orphan(&[(7, "<< /Type /Pages /Kids [] /Count 1000000 >>")]),
+            &[],
+            "Unreferenced /Pages node declaring 1000000 pages (union)",
+        ),
+        good(
+            COUNT,
+            "outlines-count",
+            count_with(
+                "1",
+                &[(7, "<< /Type /Outlines /Count 1000000 >>")],
+                "/Outlines 7 0 R",
+            ),
+            &[],
+            "Outline /Count is not a page count",
+        ),
+        good(
+            INCR,
+            "linearized",
+            linearized(false),
+            &[],
+            "Linearized file: the first-page xref section is not an update",
+        ),
+        bad(
+            INCR,
+            "linearized-updated",
+            linearized(true),
+            &[],
+            "Linearized file with one incremental update",
+        ),
+        bad(
+            XREF,
+            "unreachable-section",
+            with_unreachable_section(Doc::new().build()),
+            &[INCR],
+            "A second xref section that no startxref or /Prev leads to",
+        ),
+        bad(
+            CYCLE,
+            "moved-across-revisions",
+            page_tree_moved,
+            &[INCR],
+            "Page moved to another /Pages node by an update: union of revisions lists it twice",
+        ),
+    ]
+}
+
 pub(crate) fn all() -> Vec<Fixture> {
     let mut out = Vec::new();
+    out.extend(batch_b_variants());
     out.extend(filetype_rules());
     out.extend(content_op_rule());
     out.extend(xml_rule());
@@ -1666,6 +2169,40 @@ pub(crate) fn all() -> Vec<Fixture> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn find(hay: &[u8], needle: &[u8]) -> Vec<usize> {
+        hay.windows(needle.len())
+            .enumerate()
+            .filter(|(_, w)| *w == needle)
+            .map(|(i, _)| i)
+            .collect()
+    }
+
+    #[test]
+    fn linearized_prev_points_forward_at_main_section() {
+        let pdf = linearized(false);
+        let xrefs = find(&pdf, b"\nxref\n");
+        assert_eq!(xrefs.len(), 2);
+        let (first, main) = (xrefs[0] + 1, xrefs[1] + 1);
+        assert!(find(&pdf, format!("/Prev {main:010}").as_bytes()).len() == 1);
+        // The last startxref points at the first-page section.
+        assert!(pdf.ends_with(format!("startxref\n{first}\n%%EOF\n").as_bytes()));
+        assert!(find(&pdf, b"/Linearized 1").len() == 1);
+        let updated = linearized(true);
+        assert!(updated.starts_with(&pdf));
+        assert_eq!(find(&updated, b"\nxref\n").len(), 3);
+        assert_eq!(find(&updated, format!("/Prev {first}").as_bytes()).len(), 1);
+    }
+
+    #[test]
+    fn unreachable_section_is_a_copy_of_the_first() {
+        let pdf = Doc::new().build();
+        let out = with_unreachable_section(pdf.clone());
+        assert!(out.starts_with(&pdf));
+        let xrefs = find(&out, b"\nxref\n");
+        assert_eq!(xrefs.len(), 2);
+        assert!(out.ends_with(format!("startxref\n{}\n%%EOF\n", xrefs[0] + 1).as_bytes()));
+    }
 
     #[test]
     fn utf16_hex_has_bom() {

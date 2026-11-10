@@ -47,6 +47,8 @@ const INDIRECT_VALUES: &[(&str, &str, &str)] = &[
     ("EXTERNAL.URL_FILESPEC", "FS", "/URL"),
     ("CODEC.JBIG2", "Filter", "/JBIG2Decode"),
     ("CODEC.JPX", "Filter", "/JPXDecode"),
+    ("RESOURCE.IMAGE_DIMENSIONS", "Width", "100000"),
+    ("RESOURCE.PAGE_SIZE", "MediaBox", "[0 0 100000 100000]"),
 ];
 
 /// Where a standalone payload object (number 10) is referenced from.

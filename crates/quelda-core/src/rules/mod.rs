@@ -13,6 +13,7 @@ mod codegen;
 pub mod declarative;
 pub mod meta;
 pub mod registry;
+pub(crate) mod values;
 
 use std::collections::HashMap;
 
