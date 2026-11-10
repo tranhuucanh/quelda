@@ -5,6 +5,7 @@
 //   if (!verdict.valid) showReasons(verdict.violations);
 //   scanner.terminate();
 
+import { crossOriginWorkerSource } from './cdn.js';
 import type { WorkerLike } from './protocol.js';
 import { createScannerWith, type Scanner, type ScannerOptions } from './scanner.js';
 
@@ -22,6 +23,11 @@ export * from './types.js';
 function defaultWorker(): WorkerLike {
   if (typeof Worker === 'undefined') {
     throw new Error('Web Workers are not available here (quelda runs in browsers; see the README for Node)');
+  }
+  const blob = crossOriginWorkerSource(import.meta.url, globalThis.location?.href);
+  if (blob !== undefined) {
+    const url = URL.createObjectURL(new Blob([blob], { type: 'text/javascript' }));
+    return new Worker(url, { type: 'module', name: 'quelda' });
   }
   // Kept literal so Vite and webpack 5 bundle the worker and its .wasm.
   return new Worker(new URL('./worker.js', import.meta.url), { type: 'module', name: 'quelda' });

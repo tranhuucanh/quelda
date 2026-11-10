@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { Worker } from 'node:worker_threads';
+import { checkPages, findChrome, serve } from './browser-check.mjs';
 
 const pkg = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
@@ -128,6 +129,73 @@ try {
     console.log(`[${name}]     serve: node ${join(pkg, 'examples/serve.mjs')} ${out}`);
   }
   console.log('build-examples: both examples built');
+
+  // Without Vite/webpack (README "Without a bundler"): the installed package
+  // served as files, an import map, a CDN on another origin, and esbuild
+  // (which leaves `new URL(…, import.meta.url)` alone) with dist/ copied next
+  // to the bundle. Same self-test page as the examples.
+  const installed = join(tmp, 'vite/node_modules/quelda');
+  const mainJs = app('vite/main.js');
+  const page = (title, head = '') =>
+    app('vite/index.html')
+      .replace(/<title>.*<\/title>/, `<title>${title}</title>`)
+      .replace('</head>', `${head}</head>`);
+  const plain = join(tmp, 'plain');
+  cpSync(join(installed, 'dist'), join(plain, 'quelda'), { recursive: true });
+  writeFileSync(join(plain, 'main.js'), mainJs.replace("from 'quelda'", "from './quelda/index.js'"));
+  writeFileSync(join(plain, 'index.html'), page('quelda (no bundler)'));
+  const importmap = join(tmp, 'importmap');
+  cpSync(join(installed, 'dist'), join(importmap, 'quelda'), { recursive: true });
+  writeFileSync(join(importmap, 'main.js'), mainJs);
+  writeFileSync(
+    join(importmap, 'index.html'),
+    page('quelda (import map)', '<script type="importmap">{ "imports": { "quelda": "./quelda/index.js" } }</script>\n'),
+  );
+  const esb = join(tmp, 'esbuild');
+  writeFileSync(join(tmp, 'vite/esbuild-entry.js'), mainJs);
+  run(join(pkg, 'node_modules/.bin/esbuild'), ['esbuild-entry.js', '--bundle', '--format=esm', `--outfile=${join(esb, 'app.js')}`, '--log-level=warning'], join(tmp, 'vite'));
+  cpSync(join(installed, 'dist'), esb, { recursive: true });
+  writeFileSync(join(esb, 'index.html'), page('quelda (esbuild)').replace('./main.js', './app.js'));
+  console.log('[no bundler / import map / CDN / esbuild] pages built');
+
+  const chrome = findChrome();
+  if (chrome === undefined) {
+    if (process.env.QUELDA_BROWSER === '1') fail('QUELDA_BROWSER=1 but no Chrome found (set CHROME=/path/to/chrome)');
+    console.log('browser check skipped: no Chrome (set CHROME=…, or QUELDA_BROWSER=1 to require it)');
+  } else {
+    const servers = [];
+    try {
+      const cdn = await serve(installed, { cors: true }); // another origin, like jsDelivr / unpkg
+      servers.push(cdn);
+      const cdnPage = join(tmp, 'cdn');
+      cpSync(join(importmap, 'main.js'), join(cdnPage, 'main.js'));
+      writeFileSync(
+        join(cdnPage, 'index.html'),
+        page('quelda (CDN)', `<script type="importmap">{ "imports": { "quelda": "${cdn.url}dist/index.js" } }</script>\n`),
+      );
+      const pages = [];
+      for (const [name, dir] of [
+        ['vite', join(tmp, 'vite/dist')],
+        ['webpack', join(tmp, 'webpack/dist')],
+        ['no bundler', plain],
+        ['import map', importmap],
+        ['CDN (cross-origin)', cdnPage],
+        ['esbuild', esb],
+      ]) {
+        const s = await serve(dir);
+        servers.push(s);
+        pages.push([name, s.url]);
+      }
+      const results = await checkPages(chrome, pages.map(([, url]) => url));
+      results.forEach((r, i) => {
+        const name = pages[i][0];
+        if (r.result !== 'ok') fail(`[browser] ${name}: self-test ${r.result} (${r.detail})`);
+        console.log(`[browser] ${name}: OK in headless Chrome (${r.detail})`);
+      });
+    } finally {
+      for (const s of servers) s.close();
+    }
+  }
 } finally {
   if (process.env.QUELDA_KEEP_EXAMPLES === '1') console.log(`kept ${tmp}`);
   else rmSync(tmp, { recursive: true, force: true });

@@ -29,7 +29,7 @@ jobs:
       - name: test
         run: cargo test --workspace
       - name: script tests
-        run: node --test scripts/homebrew-formula.test.mjs scripts/cli-dist-test.test.mjs
+        run: node --test scripts/homebrew-formula.test.mjs scripts/cli-dist-test.test.mjs scripts/docs-examples-test.test.mjs
       - name: build wasm
         run: cargo build -p quelda-core -p quelda-wasm --target wasm32-unknown-unknown --profile release-wasm
 
@@ -122,4 +122,6 @@ jobs:
           npm test
       - name: npm examples (Vite, webpack) from the packed package
         working-directory: packages/quelda-js
+        env:
+          QUELDA_BROWSER: "1"  # headless Chrome on the runner must run every page
         run: npm run test:examples

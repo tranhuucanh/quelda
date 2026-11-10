@@ -24,10 +24,9 @@ describe('npm pack', () => {
   const files = result.files.map((f) => f.path).sort();
 
   it('contains exactly the package files', () => {
-    const modules = ['host', 'index', 'protocol', 'scanner', 'types', 'worker'];
+    const modules = ['cdn', 'host', 'index', 'protocol', 'scanner', 'types', 'worker'];
     const expected = [
-      'LICENSE-APACHE',
-      'LICENSE-MIT',
+      'LICENSE',
       'README.md',
       'package.json',
       ...modules.flatMap((m) => [`dist/${m}.js`, `dist/${m}.d.ts`]),
@@ -67,7 +66,7 @@ describe('npm pack', () => {
     expect(pkg.version).toMatch(/^\d+\.\d+\.\d+(-rc\.\d+)?$/);
     expect(pkg.engines.node).toBe('>=20');
     expect(pkg.type).toBe('module');
-    expect(pkg.license).toBe('MIT OR Apache-2.0');
+    expect(pkg.license).toBe('MIT');
   });
 
   it('keeps the asset references bundlers detect', () => {

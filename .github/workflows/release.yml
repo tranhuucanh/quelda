@@ -112,8 +112,8 @@ jobs:
       - name: package
         run: |
           mkdir -p stage dist
-          cp "target/${{ matrix.target }}/release/quelda" LICENSE-MIT LICENSE-APACHE stage/
-          tar -C stage -czf "dist/quelda-${{ matrix.target }}.tar.gz" quelda LICENSE-MIT LICENSE-APACHE
+          cp "target/${{ matrix.target }}/release/quelda" LICENSE stage/
+          tar -C stage -czf "dist/quelda-${{ matrix.target }}.tar.gz" quelda LICENSE
       - uses: actions/upload-artifact@v4
         with:
           name: quelda-${{ matrix.target }}
@@ -205,7 +205,7 @@ jobs:
         run: |
           npm ci --no-audit --no-fund
           npm test
-          npm run test:examples
+          QUELDA_BROWSER=1 npm run test:examples
           test "$(node -p 'require("./package.json").version')" = "${{ needs.meta.outputs.version }}"
       - name: publish
         working-directory: packages/quelda-js

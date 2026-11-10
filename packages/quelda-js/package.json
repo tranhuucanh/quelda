@@ -2,7 +2,7 @@
   "name": "quelda",
   "version": "0.1.0-rc.1",
   "description": "PDF security scanner (WebAssembly): one PDF + policy in, verdict out",
-  "license": "MIT OR Apache-2.0",
+  "license": "MIT",
   "author": "0xTh3OKrypt <tranhuucanh39@gmail.com>",
   "homepage": "https://github.com/tranhuucanh/quelda/tree/main/packages/quelda-js#readme",
   "repository": {
@@ -41,8 +41,7 @@
     "dist/**/*.js",
     "dist/**/*.d.ts",
     "dist/wasm/quelda_bg.wasm",
-    "LICENSE-MIT",
-    "LICENSE-APACHE"
+    "LICENSE"
   ],
   "scripts": {
     "build:wasm": "../../scripts/wasm-build.sh",

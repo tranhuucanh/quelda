@@ -4,7 +4,7 @@
 class Quelda < Formula
   desc "PDF security scanner: one PDF and a policy in, a verdict out"
   homepage "https://github.com/tranhuucanh/quelda"
-  license any_of: ["MIT", "Apache-2.0"]
+  license "MIT"
 
   on_macos do
     on_arm do

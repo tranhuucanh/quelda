@@ -5,7 +5,7 @@
 //! - every sample policy is accepted by the engine;
 //! - every `quelda …` command in README.md, docs/cli.md and docs/policy.md
 //!   runs (exit 0 on a clean `upload.pdf`);
-//! - the tables of docs/rules.md, docs/policy.md and the README showcase
+//! - the tables of docs/rules.md, docs/policy.md and the README showcases (repo, npm)
 //!   (rules, preset actions, locked rules, limits, thresholds, engine errors,
 //!   counts) are what the engine does.
 
@@ -324,7 +324,6 @@ fn rules_md_lists_every_rule_with_its_preset_actions() {
 
 #[test]
 fn readme_showcase_counts_match_the_registry() {
-    let md = read("README.md");
     let rules = registry();
     let header = format!(
         "**{} rules in {} categories**, plus {} engine safeguards",
@@ -332,16 +331,19 @@ fn readme_showcase_counts_match_the_registry() {
         Category::ALL.len(),
         IssueCode::ALL.len() - 1 // POLICY.INVALID is not a safeguard
     );
-    assert!(md.contains(&header), "README: {header}");
-    let section = &md[md.find("## What quelda checks").unwrap()..];
-    let section = &section[..section[3..].find("\n## ").unwrap()];
-    let rows = table_rows(section);
-    assert_eq!(rows.len(), Category::ALL.len());
-    for (_, cells) in rows {
-        let (key, _) = code_cell(&cells[0]);
-        let n = rules.iter().filter(|r| r.category.key() == key).count();
-        assert!(n > 0, "README: unknown category {key}");
-        assert_eq!(cells[1], n.to_string(), "README: rules in {key}");
+    for doc in ["README.md", "packages/quelda-js/README.md"] {
+        let md = read(doc);
+        assert!(md.contains(&header), "{doc}: {header}");
+        let section = &md[md.find("## What quelda checks").unwrap()..];
+        let section = &section[..section[3..].find("\n## ").unwrap()];
+        let rows = table_rows(section);
+        assert_eq!(rows.len(), Category::ALL.len(), "{doc}");
+        for (_, cells) in rows {
+            let (key, _) = code_cell(&cells[0]);
+            let n = rules.iter().filter(|r| r.category.key() == key).count();
+            assert!(n > 0, "{doc}: unknown category {key}");
+            assert_eq!(cells[1], n.to_string(), "{doc}: rules in {key}");
+        }
     }
 }
 
@@ -568,4 +570,35 @@ fn policy_md_examples_are_valid_policies() {
         n += 1;
     }
     assert!(n >= 6, "{n}");
+}
+
+/// The test-suite numbers the READMEs quote are the generated fixtures'.
+#[test]
+fn readme_test_counts_match_the_fixtures() {
+    let manifest: Value =
+        serde_json::from_str(&fs::read_to_string(fixture("manifest.json")).unwrap()).unwrap();
+    let files = manifest["files"].as_object().unwrap();
+    let count = |part: &str| files.keys().filter(|path| path.contains(part)).count();
+    let conformance = fs::read_dir(repo().join("tests/conformance"))
+        .unwrap()
+        .filter(|e| {
+            e.as_ref()
+                .unwrap()
+                .path()
+                .extension()
+                .is_some_and(|x| x == "json")
+        })
+        .count();
+    let md = read("README.md");
+    for quoted in [
+        format!("**{} PDF files**", files.len()),
+        format!("{} attack\nvariants", count("/bad/")),
+        format!("{} clean look-alikes", count("/good/")),
+        format!("plus {conformance}\npolicy cases"),
+    ] {
+        assert!(md.contains(&quoted), "README.md: {quoted:?}");
+    }
+    let npm = read("packages/quelda-js/README.md");
+    let quoted = format!("tested against {}\ngenerated", files.len());
+    assert!(npm.contains(&quoted), "npm README: {quoted:?}");
 }
