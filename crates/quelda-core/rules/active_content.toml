@@ -12,3 +12,51 @@ since = "0.1.0"
 message = "Launch action can execute external programs"
 description = "Action dictionary with /S /Launch (ISO 32000-2 §12.6.4.6): opens or runs a file or application on the reader's system."
 match = { dict = { key = "S", name = "Launch" } }
+
+[[rule]]
+id = "ACTIVE.JAVASCRIPT"
+category = "active_content"
+severity = "high"
+default_action = "block"
+locked = false
+stage = "stable"
+since = "0.1.0"
+message = "Document contains JavaScript"
+description = "A dictionary with a /JS key (JavaScript action or rendition script, as a string or a stream), a /S /JavaScript action, or a /JavaScript name tree (document-level scripts) — ISO 32000-2 §12.6.4.17, §7.7.4. Reader JavaScript is the most common PDF exploit vector."
+match = { dict = { any = [ { key = "JS" }, { key = "S", name = "JavaScript" }, { key = "JavaScript" } ] } }
+
+[[rule]]
+id = "ACTIVE.OPEN_ACTION"
+category = "active_content"
+severity = "medium"
+default_action = "block"
+locked = false
+stage = "stable"
+since = "0.1.0"
+message = "Document runs an action when opened"
+description = "A dictionary with an /OpenAction key (ISO 32000-2 §7.7.2): a destination or action performed automatically when the document is opened, often used to start JavaScript or other actions without user interaction."
+match = { dict = { key = "OpenAction" } }
+
+[[rule]]
+id = "ACTIVE.ADDITIONAL_ACTIONS"
+category = "active_content"
+severity = "medium"
+default_action = "block"
+locked = false
+stage = "stable"
+since = "0.1.0"
+message = "Document has additional (trigger) actions"
+description = "A dictionary with an /AA key (ISO 32000-2 §12.6.3): actions triggered by events on the document, a page, an annotation or a form field (open, close, focus, keystroke, mouse…), run without an explicit click."
+match = { dict = { key = "AA" } }
+
+[[rule]]
+id = "ACTIVE.OTHER_ACTIONS"
+category = "active_content"
+severity = "low"
+default_action = "warn"
+locked = false
+stage = "stable"
+since = "0.1.0"
+message = "Document uses other interactive actions (named, rendition, hide, OCG…)"
+description = "Action dictionary with /S one of Rendition, SetOCGState, Named, Hide, GoTo3DView, Trans, Sound, Movie (ISO 32000-2 §12.6.4). Not dangerous by themselves but used to chain or hide content; Named actions (NextPage…) are common, so balanced only warns."
+match = { dict = { key = "S", name_in = ["Rendition", "SetOCGState", "Named", "Hide", "GoTo3DView", "Trans", "Sound", "Movie"] } }

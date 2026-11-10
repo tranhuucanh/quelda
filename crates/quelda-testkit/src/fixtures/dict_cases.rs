@@ -1,5 +1,7 @@
-//! Rules that match a dictionary key/value. Each case is expanded into the five
-//! standard evasion variants: plain, name-encoded, in-objstm, old-revision, nested-dict.
+//! Rules that match a dictionary key/value. Each case is expanded into the
+//! standard evasion variants: plain, name-encoded, in-objstm (Flate, LZW, and
+//! a 3-filter chain), old-revision, nested-dict, and — for rules that match a
+//! value — indirect-value (the value is an indirect object, ADR #19).
 
 use super::{Doc, Fixture, LINK_TO_10, bad};
 use crate::builder::{PdfBuilder, Xref};
@@ -10,8 +12,41 @@ pub(crate) const VARIANTS: &[&str] = &[
     "plain",
     "name-encoded",
     "in-objstm",
+    "in-objstm-lzw",
+    "in-objstm-filter-chain",
     "old-revision",
     "nested-dict",
+];
+
+/// Variant written only for cases with [`DictCase::indirect`].
+pub(crate) const INDIRECT: &str = "indirect-value";
+
+/// Object number of the indirect value in the `indirect-value` variant.
+const INDIRECT_OBJ: u32 = 30;
+
+/// ObjStm filters of the `in-objstm-filter-chain` variant (Flate → ASCIIHex →
+/// ASCII85 when decoding).
+const OBJSTM_CHAIN: [Filter; 3] = [Filter::Ascii85, Filter::AsciiHex, Filter::Flate];
+
+/// `(rule, key, value)`: rules that match the value of `key`; their
+/// `indirect-value` variant replaces `/key value` with `/key 30 0 R` and adds
+/// `30 0 obj value endobj`.
+const INDIRECT_VALUES: &[(&str, &str, &str)] = &[
+    ("POSTSCRIPT.XOBJECT", "Subtype", "/PS"),
+    ("POSTSCRIPT.TYPE4_FUNCTION", "FunctionType", "4"),
+    ("ACTIVE.JAVASCRIPT", "S", "/JavaScript"),
+    ("ACTIVE.LAUNCH", "S", "/Launch"),
+    ("ACTIVE.OTHER_ACTIONS", "S", "/Named"),
+    ("EMBED.EMBEDDED_FILE", "Type", "/EmbeddedFile"),
+    ("EMBED.FILE_ATTACHMENT", "Subtype", "/FileAttachment"),
+    ("EMBED.RICH_MEDIA", "Subtype", "/RichMedia"),
+    ("EXTERNAL.URI", "S", "/URI"),
+    ("EXTERNAL.REMOTE_GOTO", "S", "/GoToR"),
+    ("EXTERNAL.SUBMIT_FORM", "S", "/SubmitForm"),
+    ("EXTERNAL.IMPORT_DATA", "S", "/ImportData"),
+    ("EXTERNAL.URL_FILESPEC", "FS", "/URL"),
+    ("CODEC.JBIG2", "Filter", "/JBIG2Decode"),
+    ("CODEC.JPX", "Filter", "/JPXDecode"),
 ];
 
 /// Where a standalone payload object (number 10) is referenced from.
@@ -50,6 +85,8 @@ pub(crate) struct DictCase {
     /// Other rules that the payload itself also triggers.
     pub also: &'static [&'static str],
     pub note: &'static str,
+    /// `(key, value)` made indirect by the `indirect-value` variant.
+    pub indirect: Option<(&'static str, &'static str)>,
 }
 
 fn obj(dict: &str, attach: Attach) -> Payload {
@@ -81,6 +118,10 @@ fn case(
         helpers: Vec::new(),
         also: &[],
         note,
+        indirect: INDIRECT_VALUES
+            .iter()
+            .find(|(r, _, _)| *r == rule)
+            .map(|&(_, k, v)| (k, v)),
     }
 }
 
@@ -360,7 +401,12 @@ pub(crate) fn build_variant(c: &DictCase, variant: &str) -> (Vec<u8>, Vec<&'stat
             add_helpers(&mut b, c);
             (b.build(), vec![])
         }
-        "in-objstm" => {
+        "in-objstm" | "in-objstm-lzw" | "in-objstm-filter-chain" => {
+            let (filters, extra): (&[Filter], _) = match variant {
+                "in-objstm" => (&[Filter::Flate], vec![]),
+                "in-objstm-lzw" => (&[Filter::Lzw], vec![]),
+                _ => (&OBJSTM_CHAIN, vec!["STRUCT.FILTER_CHAIN"]),
+            };
             let mut doc = Doc::new();
             doc.version = "1.5";
             let mut b = plain_builder(c, text, doc, false);
@@ -369,8 +415,20 @@ pub(crate) fn build_variant(c: &DictCase, variant: &str) -> (Vec<u8>, Vec<&'stat
                 Payload::Catalog(_) => 1,
                 Payload::Page(_) => 3,
             };
-            b.objstm(9, &[member], &[Filter::Flate]).xref(Xref::Stream);
+            b.objstm(9, &[member], filters).xref(Xref::Stream);
             add_helpers(&mut b, c);
+            (b.build(), extra)
+        }
+        INDIRECT => {
+            let Some((key, value)) = c.indirect else {
+                panic!("{}: no indirect value", c.rule);
+            };
+            let from = format!("/{key} {value}");
+            assert!(text.contains(&from), "{}: payload has no `{from}`", c.rule);
+            let text = text.replacen(&from, &format!("/{key} {INDIRECT_OBJ} 0 R"), 1);
+            let mut b = plain_builder(c, &text, Doc::new(), true);
+            add_helpers(&mut b, c);
+            b.object(INDIRECT_OBJ, value);
             (b.build(), vec![])
         }
         "old-revision" => {
@@ -408,7 +466,8 @@ pub(crate) fn build_variant(c: &DictCase, variant: &str) -> (Vec<u8>, Vec<&'stat
 pub(crate) fn all() -> Vec<Fixture> {
     let mut out = Vec::new();
     for c in cases() {
-        for &variant in VARIANTS {
+        let indirect = c.indirect.map(|_| INDIRECT);
+        for &variant in VARIANTS.iter().chain(indirect.iter()) {
             let (bytes, extra) = build_variant(&c, variant);
             let mut also: Vec<&'static str> = c.also.to_vec();
             also.extend(extra);
@@ -498,9 +557,45 @@ mod tests {
     }
 
     #[test]
+    fn indirect_value_variant() {
+        let (pdf, extra) = build_variant(&launch(), INDIRECT);
+        assert!(extra.is_empty());
+        assert!(contains(&pdf, b"/S 30 0 R"));
+        assert!(contains(&pdf, b"30 0 obj\n/Launch\nendobj"));
+        assert!(!contains(&pdf, b"/S /Launch"));
+        let t4 = cases()
+            .into_iter()
+            .find(|c| c.rule == "POSTSCRIPT.TYPE4_FUNCTION")
+            .unwrap();
+        let (pdf, _) = build_variant(&t4, INDIRECT);
+        assert!(contains(&pdf, b"/FunctionType 30 0 R"));
+        // Every listed rule has a case, and key-only rules have none.
+        for (rule, _, _) in INDIRECT_VALUES {
+            assert!(cases().iter().any(|c| c.rule == *rule), "{rule}");
+        }
+        for c in cases() {
+            if c.rule == "ACTIVE.OPEN_ACTION" || c.rule == "FORMS.ACROFORM" {
+                assert!(c.indirect.is_none());
+            }
+        }
+    }
+
+    #[test]
+    fn objstm_filter_variants() {
+        let (pdf, extra) = build_variant(&launch(), "in-objstm-lzw");
+        assert!(extra.is_empty());
+        assert!(contains(&pdf, b"/LZWDecode"));
+        assert!(!contains(&pdf, b"/Launch"));
+        let (pdf, extra) = build_variant(&launch(), "in-objstm-filter-chain");
+        assert_eq!(extra, vec!["STRUCT.FILTER_CHAIN"]);
+        assert!(contains(&pdf, b"/ASCII85Decode"));
+        assert!(!contains(&pdf, b"/Launch"));
+    }
+
+    #[test]
     fn every_case_builds_every_variant() {
         for c in cases() {
-            for v in VARIANTS {
+            for v in VARIANTS.iter().chain(c.indirect.map(|_| &INDIRECT)) {
                 let (pdf, _) = build_variant(&c, v);
                 assert!(pdf.starts_with(b"%PDF-1."), "{} {v}", c.rule);
             }

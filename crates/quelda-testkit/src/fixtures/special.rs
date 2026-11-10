@@ -810,7 +810,8 @@ fn extra_rule_variants() -> Vec<Fixture> {
     };
     let goto_e = action("<< /S /GoToE /T << /R /C /N (quelda-test) >> >>");
     // The value of `/S` is an indirect object (ADR #19: declarative rules
-    // follow one level of references, every definition).
+    // follow one level of references, every definition). The `bad` side is
+    // the generic `indirect-value` variant (dict_cases).
     let indirect_s = |name: &str| {
         let mut d = Doc::new();
         d.annots.push(6);
@@ -821,13 +822,6 @@ fn extra_rule_variants() -> Vec<Fixture> {
         b.build()
     };
     vec![
-        bad(
-            "ACTIVE.LAUNCH",
-            "indirect-value",
-            indirect_s("Launch"),
-            &[],
-            "Launch action whose /S is an indirect name object",
-        ),
         good(
             "ACTIVE.LAUNCH",
             "indirect-goto",
@@ -1463,6 +1457,197 @@ fn crypt_rule() -> Vec<Fixture> {
     ]
 }
 
+/// Batch A (Step 9) evasion variants and near-misses not covered above.
+fn batch_a_variants() -> Vec<Fixture> {
+    const XOBJ: &str = "POSTSCRIPT.XOBJECT";
+    const TYPE4: &str = "POSTSCRIPT.TYPE4_FUNCTION";
+    const OTHER: &str = "ACTIVE.OTHER_ACTIONS";
+    const CRYPT: &str = "CRYPT.ENCRYPTED";
+    const EMBED: &str = "EMBED.EMBEDDED_FILE";
+    let form = |dict: &str, extra: Option<(u32, &[u8])>| {
+        let mut d = Doc::new();
+        d.xobjects.push(("Fx", 10));
+        d.content = [BASE_CONTENT, b"/Fx Do\n"].concat();
+        let mut b = d.builder();
+        b.stream(
+            10,
+            &format!("/Type /XObject /Subtype /Form /BBox [0 0 10 10] {dict}"),
+            b"0 0 m 1 1 l S\n",
+            &[],
+        );
+        if let Some((n, data)) = extra {
+            b.stream(n, "", data, &[]);
+        }
+        b.build()
+    };
+    let ps_with = |prefix: &[u8]| [prefix, &filetype::ps_adobe()].concat();
+    let pdf_with_raw = |raw: &[u8]| {
+        let mut b = Doc::new().builder();
+        b.raw(raw).raw(b"\n");
+        b.build()
+    };
+    vec![
+        bad(
+            XOBJ,
+            "subtype2-ps",
+            form("/Subtype2 /PS", None),
+            &[],
+            "Form XObject marked /Subtype2 /PS (PostScript pass-through)",
+        ),
+        bad(
+            XOBJ,
+            "form-ps-key",
+            form("/PS 11 0 R", Some((11, b"% quelda-test\nshowpage\n"))),
+            &[],
+            "Form XObject with an alternate /PS PostScript stream",
+        ),
+        good(
+            XOBJ,
+            "ps-resource-name",
+            form("/Resources << /ExtGState << /PS 11 0 R >> >>", None),
+            &[],
+            "Form XObject whose ExtGState resource is named /PS",
+        ),
+        bad(
+            TYPE4,
+            "function-type-real",
+            {
+                let mut b = Doc::new().builder();
+                b.stream(
+                    10,
+                    "/FunctionType 4.0 /Domain [0 1] /Range [0 1]",
+                    b"{ dup }",
+                    &[],
+                );
+                b.build()
+            },
+            &[],
+            "/FunctionType written as the real 4.0",
+        ),
+        bad(
+            OTHER,
+            "s-hide",
+            action("<< /S /Hide /T (quelda) >>"),
+            &[],
+            "Hide action",
+        ),
+        bad(
+            OTHER,
+            "s-set-ocg-state",
+            action("<< /S /SetOCGState /State [/OFF] >>"),
+            &[],
+            "SetOCGState action",
+        ),
+        bad(
+            OTHER,
+            "s-rendition",
+            action("<< /S /Rendition /OP 0 >>"),
+            &[],
+            "Rendition action (no script)",
+        ),
+        good(
+            OTHER,
+            "transparency-group",
+            page_note("/Group << /S /Transparency /CS /DeviceRGB >>"),
+            &[],
+            "Page group /S /Transparency is not a Trans action",
+        ),
+        good(
+            CRYPT,
+            "encrypt-null",
+            {
+                let mut b = Doc::new().builder();
+                b.trailer("/Encrypt null");
+                b.build()
+            },
+            &[],
+            "/Encrypt null in the trailer: not encrypted",
+        ),
+        bad(
+            PS_MAGIC,
+            "bom-before-ps",
+            ps_with(b"\xEF\xBB\xBF"),
+            &[NOT_PDF],
+            "UTF-8 byte order mark before %!PS",
+        )
+        .at_least(),
+        bad(
+            PS_MAGIC,
+            "whitespace-before-ps",
+            ps_with(b"\r\n  \t\n"),
+            &[NOT_PDF],
+            "Whitespace before %!PS",
+        )
+        .at_least(),
+        bad(
+            PS_MAGIC,
+            "pjl-wrapped",
+            ps_with(
+                b"\x1B%-12345X@PJL JOB NAME=\"quelda-test\"\r\n@PJL ENTER LANGUAGE=POSTSCRIPT\r\n",
+            ),
+            &[NOT_PDF],
+            "PostScript inside a PJL printer job",
+        )
+        .at_least(),
+        bad(
+            FOREIGN,
+            "svg-with-bom",
+            [b"\xEF\xBB\xBF\n".as_slice(), &filetype::svg()].concat(),
+            &[NOT_PDF],
+            "SVG preceded by a byte order mark and a newline",
+        )
+        .at_least(),
+        bad(
+            FOREIGN,
+            "png",
+            b"\x89PNG\r\n\x1A\n\0\0\0\x0DIHDR quelda-test".to_vec(),
+            &[NOT_PDF],
+            "PNG signature (truncated image)",
+        )
+        .at_least(),
+        bad(
+            FOREIGN,
+            "pe-executable",
+            b"MZ quelda-test: not a real executable\n".to_vec(),
+            &[NOT_PDF],
+            "PE (`MZ`) signature",
+        )
+        .at_least(),
+        bad(
+            POLYGLOT,
+            "svg-in-body",
+            pdf_with_raw(b"<svg xmlns=\"http://www.w3.org/2000/svg\"><!-- quelda-test --></svg>"),
+            &[],
+            "SVG markup between PDF objects",
+        ),
+        bad(
+            POLYGLOT,
+            "zip-in-string",
+            {
+                let mut b = Doc::new().builder();
+                b.object(
+                    10,
+                    [b"<< /QueldaNote (".as_slice(), b"PK\x03\x04", b") >>"].concat(),
+                );
+                b.build()
+            },
+            &[],
+            "ZIP local file header inside a literal string (outside stream data)",
+        ),
+        good(
+            POLYGLOT,
+            "zip-in-embedded-file",
+            {
+                let mut b = Doc::new().builder();
+                b.stream(10, "/Type /EmbeddedFile", &filetype::zip_one_file(), &[]);
+                b.build()
+            },
+            &[EMBED],
+            "Unfiltered ZIP inside an embedded file stream",
+        ),
+    ]
+}
+
 pub(crate) fn all() -> Vec<Fixture> {
     let mut out = Vec::new();
     out.extend(filetype_rules());
@@ -1474,6 +1659,7 @@ pub(crate) fn all() -> Vec<Fixture> {
     out.extend(resource_rules());
     out.extend(structure_rules());
     out.extend(crypt_rule());
+    out.extend(batch_a_variants());
     out
 }
 
