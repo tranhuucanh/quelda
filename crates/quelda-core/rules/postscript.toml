@@ -24,15 +24,3 @@ since = "0.1.0"
 message = "PostScript operator in a content stream"
 description = "The PS content operator (ISO 32000-1 §8.8.2, deprecated) hands its operand to a PostScript interpreter. Checked in every content stream: page contents, Form XObjects, appearance streams, Type 3 glyph procedures, and streams of unknown role."
 match = { content_op = "PS" }
-
-[[rule]]
-id = "POSTSCRIPT.TYPE4_FUNCTION"
-category = "postscript"
-severity = "medium"
-default_action = "block"
-locked = false
-stage = "stable"
-since = "0.1.0"
-message = "PostScript calculator (Type 4) function"
-description = "A function dictionary with /FunctionType 4 (ISO 32000-2 §7.10.5): a small PostScript-language program run by the renderer, historically a source of interpreter bugs."
-match = { dict = { key = "FunctionType", int = 4 } }

@@ -21,11 +21,11 @@ fn is_image(o: &PdfObject) -> bool {
 /// Decodes every top-level stream of a fixture, except images: the engine
 /// never decodes image data (design §4.4), and large real images exceed the
 /// per-stream budget by design.
-fn decode_all(pdf: &[u8]) -> Vec<(u32, DecodeOutcome)> {
+fn decode_all(pdf: &[u8]) -> Vec<(u32, DecodeOutcome<'_>)> {
     decode_streams(pdf, false)
 }
 
-fn decode_streams(pdf: &[u8], images: bool) -> Vec<(u32, DecodeOutcome)> {
+fn decode_streams(pdf: &[u8], images: bool) -> Vec<(u32, DecodeOutcome<'_>)> {
     let mut budget = Budget::new(&Limits::default());
     parse_all(pdf)
         .into_iter()

@@ -14,6 +14,8 @@ serde_json = "1.0.154"
 sha2 = "0.11.0"
 
 [dev-dependencies]
+# Reference zlib (port of zlib 1.3) for the truncated-Flate equivalence test.
+flate2 = { version = "1.1.10", default-features = false, features = ["zlib-rs"] }
 jsonschema = { version = "0.61.0", default-features = false }
 # In-memory fixtures (testkit never depends on core: writer ≠ parser).
 quelda-testkit = { path = "../quelda-testkit" }

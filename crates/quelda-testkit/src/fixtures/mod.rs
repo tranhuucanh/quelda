@@ -6,6 +6,7 @@
 //! 5 font, 6 link annotation (carrier), 7 extra page-tree node, 9 ObjStm,
 //! 10–19 payload, 20+ helper objects.
 
+mod adr26;
 mod benign;
 mod dict_cases;
 mod filetype;
@@ -272,6 +273,7 @@ pub fn all() -> Vec<Fixture> {
     out.extend(malformed::all());
     out.extend(dict_cases::all());
     out.extend(special::all());
+    out.extend(adr26::all());
     out
 }
 

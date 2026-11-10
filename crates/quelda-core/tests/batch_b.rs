@@ -78,7 +78,7 @@ fn batch_b_registered_as_designed() {
     }
     // With batch A (13 rules): the whole v0.1 rule set.
     assert_eq!(BATCH_B.len(), 26);
-    assert_eq!(registry::list().len(), 39);
+    assert_eq!(registry::list().len(), 40);
 }
 
 /// Variant names of the in-memory `bad/` fixtures of `rule`.
@@ -444,10 +444,8 @@ fn findings_carry_site_and_detail() {
         "rules/XML.DOCTYPE/bad/xfa-indirect-array.pdf",
         "XML.DOCTYPE",
     );
-    assert_eq!(
-        x.detail.as_deref(),
-        Some("<!DOCTYPE in unknown-role stream (UTF-8)")
-    );
+    // The XML role follows the indirect array (ADR #26).
+    assert_eq!(x.detail.as_deref(), Some("<!DOCTYPE in XML stream (UTF-8)"));
     let x = first("rules/CODEC.JBIG2/bad/inline-image.pdf", "CODEC.JBIG2");
     assert_eq!(x.detail.as_deref(), Some("inline image JBIG2Decode"));
     let x = first(
