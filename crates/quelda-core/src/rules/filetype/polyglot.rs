@@ -24,19 +24,6 @@ static META: RuleMeta = RuleMeta {
         files, content strings) do not count.",
 };
 
-/// Signatures; the markup ones are ASCII case-insensitive.
-const ZIP: &[(&[u8], &str)] = &[
-    (b"PK\x03\x04", "ZIP local file header"),
-    (b"PK\x01\x02", "ZIP central directory"),
-    (b"PK\x05\x06", "ZIP end of central directory"),
-    (b"PK\x06\x06", "ZIP64 end of central directory"),
-];
-const MARKUP: &[(&[u8], &str)] = &[
-    (b"<script", "HTML <script>"),
-    (b"<html", "HTML document"),
-    (b"<svg", "SVG document"),
-];
-
 /// Sorted, merged byte ranges of every top-level stream's raw data.
 fn stream_ranges(ctx: &Ctx) -> Vec<Range<usize>> {
     let mut v: Vec<Range<usize>> = ctx
@@ -63,33 +50,6 @@ fn inside(ranges: &[Range<usize>], pos: usize) -> bool {
     ranges.get(i).is_some_and(|r| r.contains(&pos))
 }
 
-/// Every signature in `raw` outside `ranges`: `(offset, what)`.
-fn find(raw: &[u8], ranges: &[Range<usize>]) -> Vec<(usize, &'static str)> {
-    let mut out = Vec::new();
-    for (i, &b) in raw.iter().enumerate() {
-        let hit = match b {
-            b'P' => ZIP
-                .iter()
-                .find(|(sig, _)| raw[i..].starts_with(sig))
-                .map(|x| x.1),
-            b'<' => MARKUP
-                .iter()
-                .find(|(sig, _)| {
-                    raw.get(i..i + sig.len())
-                        .is_some_and(|w| w.eq_ignore_ascii_case(sig))
-                })
-                .map(|x| x.1),
-            _ => None,
-        };
-        if let Some(what) = hit
-            && !inside(ranges, i)
-        {
-            out.push((i, what));
-        }
-    }
-    out
-}
-
 impl Rule for Polyglot {
     fn meta(&self) -> &'static RuleMeta {
         &META
@@ -102,8 +62,11 @@ impl Rule for Polyglot {
             return;
         }
         let ranges = stream_ranges(ctx);
-        for (offset, what) in find(ctx.raw(), &ranges) {
-            out.report(&META, Site::Offset(offset), Some(what.to_string()));
+        for sig in ctx.signatures() {
+            if !inside(&ranges, sig.offset) {
+                let what = sig.kind.describe().to_string();
+                out.report(&META, Site::Offset(sig.offset), Some(what));
+            }
         }
     }
 }

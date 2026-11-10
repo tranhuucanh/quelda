@@ -31,6 +31,23 @@ jobs:
       - name: build wasm
         run: cargo build -p quelda-core -p quelda-wasm --target wasm32-unknown-unknown --profile release-wasm
 
+  # Throughput gate (plan Step 16, ADR #29): PR head vs its base on the same
+  # runner; fails on a verdict change or > 15 % slower on a heavy file.
+  bench:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: bench gate
+        run: scripts/bench-gate.sh "${{ github.event.pull_request.base.sha }}"
+
   deny:
     runs-on: ubuntu-latest
     steps:

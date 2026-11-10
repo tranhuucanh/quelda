@@ -157,7 +157,7 @@ fn indirect_object(
             Some(after_kw) => {
                 let (stream, end) = locate_stream(src, dict, after_kw, scanned)?;
                 p.lex.set_pos(end);
-                PdfObject::Stream(stream)
+                PdfObject::Stream(Box::new(stream))
             }
             None => PdfObject::Dict(dict),
         };
@@ -238,7 +238,7 @@ pub fn stream_data_by_scan(src: &[u8], data_start: usize) -> Option<(Range<usize
 }
 
 fn find(hay: &[u8], needle: &[u8]) -> Option<usize> {
-    hay.windows(needle.len()).position(|w| w == needle)
+    memchr::memmem::find(hay, needle)
 }
 
 /// `after_kw` is the offset right after the `stream` keyword.

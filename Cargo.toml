@@ -41,3 +41,9 @@ panic = "abort"
 # wasm-bindgen needs the `target_features` section; scripts/wasm-build.sh
 # strips names/debug with wasm-opt after wasm-bindgen.
 strip = false
+
+# Release with symbols, for profilers (`--profile profiling`).
+[profile.profiling]
+inherits = "release"
+debug = true
+strip = false

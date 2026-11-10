@@ -51,18 +51,39 @@ impl Location {
 }
 
 /// Calls `f` for every dictionary in `objects`, depth-first in file order.
-/// Iterative: nesting is bounded by the parser, not by the stack.
+/// Iterative: nesting is bounded by the parser, not by the stack. One path
+/// is shared by the whole walk (a step is pushed going down, popped coming
+/// back), so deep nesting costs no copies.
 pub fn visit_dicts<'a>(objects: &'a [ObjectEntry], mut f: impl FnMut(&'a Dict, &Location)) {
+    enum Step<'a> {
+        Enter(&'a PdfObject, Option<PathSeg>),
+        Leave,
+    }
+    let mut stack: Vec<Step<'a>> = Vec::new();
     for (i, entry) in objects.iter().enumerate() {
-        let mut stack: Vec<(&'a PdfObject, Vec<PathSeg>)> = vec![(&entry.object, Vec::new())];
-        while let Some((obj, path)) = stack.pop() {
+        let mut loc = Location::of(i, entry);
+        stack.push(Step::Enter(&entry.object, None));
+        while let Some(step) = stack.pop() {
+            let obj = match step {
+                Step::Leave => {
+                    loc.path.pop();
+                    continue;
+                }
+                Step::Enter(obj, seg) => {
+                    if let Some(seg) = seg {
+                        loc.path.push(seg);
+                        stack.push(Step::Leave);
+                    }
+                    obj
+                }
+            };
             let dict = match obj {
                 PdfObject::Dict(d) => d,
                 PdfObject::Stream(s) => &s.dict,
                 PdfObject::Array(items) => {
                     for (k, item) in items.iter().enumerate().rev() {
                         if is_container(item) {
-                            stack.push((item, child(&path, PathSeg::Index(k))));
+                            stack.push(Step::Enter(item, Some(PathSeg::Index(k))));
                         }
                     }
                     continue;
@@ -71,15 +92,9 @@ pub fn visit_dicts<'a>(objects: &'a [ObjectEntry], mut f: impl FnMut(&'a Dict, &
             };
             for (k, v) in dict.entries().iter().rev() {
                 if is_container(v) {
-                    stack.push((v, child(&path, PathSeg::Key(k.clone()))));
+                    stack.push(Step::Enter(v, Some(PathSeg::Key(k.clone()))));
                 }
             }
-            let loc = Location {
-                object: i,
-                id: entry.id,
-                source: entry.location,
-                path,
-            };
             f(dict, &loc);
         }
     }
@@ -87,13 +102,6 @@ pub fn visit_dicts<'a>(objects: &'a [ObjectEntry], mut f: impl FnMut(&'a Dict, &
 
 fn is_container(o: &PdfObject) -> bool {
     matches!(o, PdfObject::Dict(_) | PdfObject::Array(_))
-}
-
-fn child(path: &[PathSeg], seg: PathSeg) -> Vec<PathSeg> {
-    let mut p = Vec::with_capacity(path.len() + 1);
-    p.extend_from_slice(path);
-    p.push(seg);
-    p
 }
 
 #[cfg(test)]

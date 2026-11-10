@@ -163,12 +163,15 @@ pub fn tokenize<'d>(
                         });
                         lex.set_pos(resume);
                     } else {
-                        f(&ContentOp {
+                        let op = ContentOp {
                             operator,
                             operands: std::mem::take(&mut operands),
                             offset: start,
                             inline_image: None,
-                        });
+                        };
+                        f(&op);
+                        // Reuse the allocation for the next operator.
+                        operands = op.operands;
                     }
                     operands.clear();
                     None

@@ -1,12 +1,14 @@
 //! `Ctx`: everything rules may read (design §5.3). Built once per scan from
 //! the union object set; rules never parse bytes.
 //!
-//! Decoding is lazy and cached: a stream is decoded at most once, and the
-//! decode budget is charged once. Streams that must be inspected (content,
+//! Decoding is lazy and cached: the decode budget is charged and issues are
+//! reported once per stream; past [`KEEP_DECODED`] cached bytes, a stream is
+//! decoded again when used rather than kept. Streams that must be inspected (content,
 //! XML, JavaScript) are decoded when the `Ctx` is built, so a stream that
 //! cannot be decoded is an engine issue whether or not a rule asks for it.
 
-use std::cell::RefCell;
+use std::borrow::Cow;
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::ops::Deref;
 use std::rc::Rc;
@@ -19,8 +21,28 @@ use crate::error::{EngineIssue, IssueCode};
 use crate::filters::{DecodeOutcome, FilterKind, decode};
 use crate::limits::{Budget, Limits, Thresholds};
 use crate::parser::document::{Facts, ObjectEntry, Revision, Trailer};
+use crate::parser::raw_scan::Signature;
 use crate::parser::structure::Structure;
-use crate::parser::{Dict, Document, Name, PdfObject};
+use crate::parser::{Dict, Document, Name, PdfObject, PdfStream};
+
+/// Decoded bytes the per-scan cache may own. Past this, streams are not
+/// kept (decoded again when used): peak memory stays about one stream above
+/// this, whatever the total decoded (plan Step 16).
+pub const KEEP_DECODED: usize = 32 << 20;
+
+#[cfg(test)]
+thread_local! {
+    /// Tests: another [`KEEP_DECODED`] for scans on this thread.
+    pub(crate) static KEEP_OVERRIDE: Cell<Option<usize>> = const { Cell::new(None) };
+}
+
+fn keep_decoded() -> usize {
+    #[cfg(test)]
+    if let Some(k) = KEEP_OVERRIDE.with(Cell::get) {
+        return k;
+    }
+    KEEP_DECODED
+}
 
 /// Decoded data of a stream (complete, truncated, or partial for a
 /// speculative stream).
@@ -83,6 +105,12 @@ pub struct Ctx<'a> {
     headers: Vec<usize>,
     budget: RefCell<Budget>,
     cache: RefCell<HashMap<usize, Rc<DecodeOutcome<'a>>>>,
+    /// Decoded bytes the cache owns, and its cap ([`KEEP_DECODED`]).
+    kept: Cell<usize>,
+    keep: usize,
+    /// Streams decoded once but not kept: object → the filter that was cut
+    /// short, if the outcome was `Truncated`.
+    dropped: RefCell<HashMap<usize, Option<FilterKind>>>,
     issues: RefCell<Vec<EngineIssue>>,
     /// Limit codes already reported (each once per scan).
     limits_hit: RefCell<HashSet<IssueCode>>,
@@ -113,6 +141,9 @@ impl<'a> Ctx<'a> {
             headers,
             budget: RefCell::new(budget),
             cache: RefCell::new(HashMap::new()),
+            kept: Cell::new(0),
+            keep: keep_decoded(),
+            dropped: RefCell::new(HashMap::new()),
             issues: RefCell::new(Vec::new()),
             limits_hit: RefCell::new(limits_hit),
         };
@@ -147,6 +178,11 @@ impl<'a> Ctx<'a> {
 
     pub fn structure(&self) -> &Structure {
         &self.doc.structure
+    }
+
+    /// Foreign-format signatures anywhere in the file, in file order.
+    pub fn signatures(&self) -> &[Signature] {
+        &self.doc.signatures
     }
 
     pub fn structure_facts(&self) -> &Facts {
@@ -218,26 +254,23 @@ impl<'a> Ctx<'a> {
         Some(StreamData(outcome))
     }
 
-    /// Decodes stream `objects[object]` once (cached) and records issues.
+    /// Decodes stream `objects[object]` and records issues, once: the
+    /// outcome is cached while the cache owns at most [`KEEP_DECODED`]
+    /// bytes. A stream decoded once but not kept is decoded again for each
+    /// later use, with a budget of its own: same input, same caps or looser,
+    /// so the same outcome; the scan's budget and issues already counted it.
     pub fn decode(&self, object: usize) -> Option<Rc<DecodeOutcome<'a>>> {
         if let Some(o) = self.cache.borrow().get(&object) {
             return Some(Rc::clone(o));
         }
         let entry = self.doc.objects.get(object)?;
         let stream = entry.object.as_stream()?;
+        if self.dropped.borrow().contains_key(&object) {
+            let mut budget = Budget::new(&self.limits);
+            return Some(Rc::new(self.run_decode(stream, &mut budget)));
+        }
         let roles = self.stream_roles(object);
-        let outcome = match resolved_chain(&self.doc, &stream.dict) {
-            Err(msg) => DecodeOutcome::Invalid(msg),
-            Ok((filter, parms)) => match self.src.get(stream.data.clone()) {
-                None => DecodeOutcome::Invalid("stream data out of range"),
-                Some(raw) => decode(
-                    raw,
-                    filter.as_ref(),
-                    parms.as_ref(),
-                    &mut self.budget.borrow_mut(),
-                ),
-            },
-        };
+        let outcome = self.run_decode(stream, &mut self.budget.borrow_mut());
         let offset = Some(Location::of(object, entry).offset());
         let what = || {
             let kind = if roles.content {
@@ -276,9 +309,32 @@ impl<'a> Ctx<'a> {
             }
             _ => {}
         }
+        let owned = match &outcome {
+            DecodeOutcome::Complete(Cow::Borrowed(_)) => 0,
+            o => o.data().map_or(0, <[u8]>::len),
+        };
         let outcome = Rc::new(outcome);
-        self.cache.borrow_mut().insert(object, Rc::clone(&outcome));
+        if self.kept.get().saturating_add(owned) <= self.keep {
+            self.kept.set(self.kept.get() + owned);
+            self.cache.borrow_mut().insert(object, Rc::clone(&outcome));
+        } else {
+            let truncated = match *outcome {
+                DecodeOutcome::Truncated { filter, .. } => Some(filter),
+                _ => None,
+            };
+            self.dropped.borrow_mut().insert(object, truncated);
+        }
         Some(outcome)
+    }
+
+    fn run_decode(&self, stream: &PdfStream, budget: &mut Budget) -> DecodeOutcome<'a> {
+        match resolved_chain(&self.doc, &stream.dict) {
+            Err(msg) => DecodeOutcome::Invalid(msg),
+            Ok((filter, parms)) => match self.src.get(stream.data.clone()) {
+                None => DecodeOutcome::Invalid("stream data out of range"),
+                Some(raw) => decode(raw, filter.as_ref(), parms.as_ref(), budget),
+            },
+        }
     }
 
     /// Streams whose data ends before the end marker of a filter (the
@@ -290,6 +346,10 @@ impl<'a> Ctx<'a> {
         for i in 0..self.roles.len() {
             let roles = self.roles[i];
             if !(roles.must_inspect() || roles.tokenized()) {
+                continue;
+            }
+            if let Some(&truncated) = self.dropped.borrow().get(&i) {
+                v.extend(truncated.map(|f| (i, f)));
                 continue;
             }
             if let Some(o) = self.decode(i) {
@@ -422,6 +482,49 @@ fn headers_outside_streams(doc: &Document) -> Vec<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Not keeping decoded data (decoding again on each use) changes no
+    /// verdict: every fixture × every preset.
+    #[test]
+    fn dropping_decoded_data_changes_nothing() {
+        fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            for e in std::fs::read_dir(dir).unwrap() {
+                let p = e.unwrap().path();
+                if p.is_dir() {
+                    walk(&p, out);
+                } else if p.extension().is_some_and(|x| x == "pdf") {
+                    out.push(p);
+                }
+            }
+        }
+        let strip = |v: String| {
+            let at = v.find("\"duration_ms\"").unwrap();
+            v[..at].to_string()
+        };
+        let mut files = Vec::new();
+        walk(
+            std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/fixtures")),
+            &mut files,
+        );
+        assert!(files.len() > 100, "run gen-fixtures first");
+        let mut dropped = 0;
+        for f in &files {
+            let src = std::fs::read(f).unwrap();
+            for preset in ["strict", "balanced", "permissive"] {
+                let policy = format!("{{\"preset\":\"{preset}\"}}");
+                let kept = strip(crate::scan_json(&src, &policy));
+                KEEP_OVERRIDE.with(|k| k.set(Some(0)));
+                let again = strip(crate::scan_json(&src, &policy));
+                KEEP_OVERRIDE.with(|k| k.set(None));
+                assert_eq!(kept, again, "{} {preset}", f.display());
+            }
+            KEEP_OVERRIDE.with(|k| k.set(Some(0)));
+            let c = Ctx::new(&src, Limits::default(), Thresholds::default());
+            dropped += c.dropped.borrow().len();
+            KEEP_OVERRIDE.with(|k| k.set(None));
+        }
+        assert!(dropped > 10, "{dropped} streams dropped");
+    }
 
     fn ctx(src: &[u8]) -> Ctx<'_> {
         Ctx::new(src, Limits::default(), Thresholds::default())

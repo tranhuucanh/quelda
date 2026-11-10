@@ -3,21 +3,18 @@
 //! parsing them is up to the caller (and bounded by its work budget).
 
 use super::lexer::is_whitespace;
-use super::structure::find_all;
 
 /// Start offsets (of `N`) of every `<digits> <ws> <digits> <ws> obj` where
 /// `obj` is not followed by a regular character, in file order. Generous on
 /// purpose: a run of digits glued to the previous token still counts, as a
 /// repairing reader's pattern search would match it.
+/// Found by the one-pass [`super::raw_scan`]; this runs it alone.
 pub fn object_candidates(src: &[u8]) -> Vec<usize> {
-    find_all(src, b"obj")
-        .filter(|&i| src.get(i + 3).is_none_or(|&b| !super::lexer::is_regular(b)))
-        .filter_map(|i| header_start_before(src, i))
-        .collect()
+    super::raw_scan::RawScan::scan(src).object_candidates
 }
 
 /// Walks back from `obj` at `kw` over `ws digits ws digits`.
-fn header_start_before(src: &[u8], kw: usize) -> Option<usize> {
+pub(crate) fn header_start_before(src: &[u8], kw: usize) -> Option<usize> {
     let mut i = kw;
     for _ in 0..2 {
         let ws_end = i;

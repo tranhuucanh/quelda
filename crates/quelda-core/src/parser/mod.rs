@@ -7,6 +7,7 @@ pub mod linear_scan;
 pub mod object;
 pub mod objstm;
 pub mod parse;
+pub mod raw_scan;
 pub mod structure;
 pub mod xref;
 

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 
-import { canonicalVerdict, compare, digest, listFiles, median, parseJsonl, record, sortedJson, table } from './bench-lib.mjs';
+import { canonicalVerdict, compare, digest, listFiles, median, parseJsonl, record, regressions, sortedJson, table } from './bench-lib.mjs';
 
 const dir = mkdtempSync(join(tmpdir(), 'bench-lib-test-'));
 after(() => rmSync(dir, { recursive: true, force: true }));
@@ -83,4 +83,16 @@ test('listFiles walks directories, skips hidden, keeps file args', () => {
   writeFileSync(join(dir, 'single.pdf'), 'x');
   const got = listFiles([join(dir, 'c'), join(dir, 'single.pdf')]).map((f) => f.name);
   strictEqual(JSON.stringify(got), JSON.stringify(['c/b.pdf', 'c/sub/a.pdf', 'single.pdf']));
+});
+
+test('regressions: slower than pct on ms_min, small and missing files skipped', () => {
+  const r = (file, ms_min, ms_median = ms_min) => ({ file, ms_min, ms_median });
+  const a = [r('a', 100), r('b', 100), r('c', 10), r('d', 100), r('e', 200, 300)];
+  const b = [r('a', 114), r('b', 116, 90), r('c', 100), r('e', 100)];
+  const got = regressions(a, b, 15);
+  strictEqual(got.length, 1);
+  strictEqual(got[0].file, 'b');
+  strictEqual(Math.round(got[0].pct), 16);
+  strictEqual(regressions(a, b, 15, 5).length, 2);
+  strictEqual(regressions([{ file: 'x', ms_median: 50 }], [{ file: 'x', ms_median: 100 }], 15).length, 1);
 });
