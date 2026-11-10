@@ -352,12 +352,14 @@ fn binary_writes_and_checks() {
             .output()
             .expect("run gen-fixtures")
     };
+    let conf_dir = dir.join("conformance-cases");
     let out = dir.to_str().unwrap();
+    let conf = conf_dir.to_str().unwrap();
 
-    let check_missing = run(&["--out", out, "--check"]);
+    let check_missing = run(&["--out", out, "--conformance-out", conf, "--check"]);
     assert!(!check_missing.status.success());
 
-    let write = run(&["--out", out]);
+    let write = run(&["--out", out, "--conformance-out", conf]);
     assert!(
         write.status.success(),
         "{}",
@@ -366,8 +368,9 @@ fn binary_writes_and_checks() {
     assert!(dir.join("manifest.json").is_file());
     assert!(dir.join("rules/ACTIVE.LAUNCH/bad/plain.pdf").is_file());
     assert!(manifest::require_dir(&dir).is_ok());
+    assert!(conf_dir.join("launch-default.json").is_file());
 
-    let check = run(&["--out", out, "--check"]);
+    let check = run(&["--out", out, "--conformance-out", conf, "--check"]);
     assert!(
         check.status.success(),
         "{}",
@@ -375,9 +378,15 @@ fn binary_writes_and_checks() {
     );
 
     std::fs::write(dir.join("benign/minimal.pdf"), b"tampered").unwrap();
-    let check = run(&["--out", out, "--check"]);
+    std::fs::remove_file(conf_dir.join("launch-default.json")).unwrap();
+    let check = run(&["--out", out, "--conformance-out", conf, "--check"]);
     assert_eq!(check.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&check.stderr).contains("changed: benign/minimal.pdf"));
+    let stderr = String::from_utf8_lossy(&check.stderr);
+    assert!(stderr.contains("changed: benign/minimal.pdf"), "{stderr}");
+    assert!(
+        stderr.contains("conformance missing: launch-default.json"),
+        "{stderr}"
+    );
 
     assert_eq!(run(&["--bogus"]).status.code(), Some(64));
     std::fs::remove_dir_all(&dir).unwrap();
@@ -391,10 +400,11 @@ fn local_fixtures_dir_is_up_to_date() {
         eprintln!("skipped: {} not generated", dir.display());
         return;
     }
-    let diffs = manifest::diff_dir(&dir, all()).unwrap();
+    let mut diffs = manifest::diff_dir(&dir, all()).unwrap();
+    diffs.extend(manifest::diff_conformance_dir(&manifest::default_conformance_dir()).unwrap());
     assert!(
         diffs.is_empty(),
-        "tests/fixtures is stale ({} diffs, e.g. {:?}): run gen-fixtures",
+        "tests/fixtures or tests/conformance is stale ({} diffs, e.g. {:?}): run gen-fixtures",
         diffs.len(),
         &diffs[..diffs.len().min(5)]
     );

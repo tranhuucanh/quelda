@@ -1,8 +1,12 @@
 # schemas
 
-JSON Schemas for the public formats, added in Step 8:
+JSON Schemas (draft 2020-12) for the public formats — the contract every binding shares:
 
-- `policy.schema.json`: the policy input (preset → category → rule overrides).
-- `verdict.schema.json`: the verdict output (`valid`, `status`, violations, warnings, errors).
+- `policy.schema.json` (`urn:quelda:schema:policy:1`): the policy input (preset → category →
+  rule overrides, `limits`, `thresholds`, `stop_on_first`, `unsafe_allow_unlock`).
+- `verdict.schema.json` (`urn:quelda:schema:verdict:1`): the verdict output (`valid`,
+  `status`, violations, warnings, errors, policy digest, stats).
 
-Every binding (WASM, CLI) validates against these schemas in the conformance suite.
+The engine is stricter than the policy schema in one way: it also rejects duplicate keys
+and rule IDs it does not know (`POLICY.INVALID`). Tests in `crates/quelda-core/tests/`
+validate real verdicts and sample policies against these files.

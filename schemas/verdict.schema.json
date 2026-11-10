@@ -1,0 +1,340 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:quelda:schema:verdict:1",
+  "title": "quelda verdict",
+  "description": "Output of scan_json (design §7). valid is true exactly when status is PASS. Version 1.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "valid",
+    "status",
+    "violations",
+    "warnings",
+    "errors",
+    "engine_version",
+    "policy",
+    "stats"
+  ],
+  "properties": {
+    "valid": {
+      "type": "boolean"
+    },
+    "status": {
+      "enum": [
+        "PASS",
+        "REJECT",
+        "ERROR"
+      ]
+    },
+    "violations": {
+      "type": "array",
+      "items": {
+        "allOf": [
+          {
+            "$ref": "#/$defs/violation"
+          },
+          {
+            "properties": {
+              "action": {
+                "const": "block"
+              }
+            }
+          }
+        ]
+      },
+      "description": "Rules that fired with action block, sorted by rule_id."
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "allOf": [
+          {
+            "$ref": "#/$defs/violation"
+          },
+          {
+            "properties": {
+              "action": {
+                "const": "warn"
+              }
+            }
+          }
+        ]
+      },
+      "description": "Rules that fired with action warn, sorted by rule_id."
+    },
+    "errors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "code",
+          "message"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "pattern": "^(LIMIT|ENGINE|POLICY)\\.[A-Z0-9_]+$"
+          },
+          "message": {
+            "type": "string"
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 18446744073709551615
+          }
+        }
+      }
+    },
+    "engine_version": {
+      "type": "string"
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "preset",
+        "digest",
+        "unsafe_allow_unlock",
+        "stop_on_first"
+      ],
+      "properties": {
+        "preset": {
+          "enum": [
+            "strict",
+            "balanced",
+            "permissive",
+            null
+          ],
+          "description": "null when the policy could not be parsed."
+        },
+        "digest": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unsafe_allow_unlock": {
+          "type": "boolean"
+        },
+        "stop_on_first": {
+          "type": "boolean"
+        }
+      }
+    },
+    "stats": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "bytes",
+        "objects",
+        "revisions",
+        "decoded_bytes",
+        "duration_ms"
+      ],
+      "properties": {
+        "bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615
+        },
+        "objects": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615
+        },
+        "revisions": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615
+        },
+        "decoded_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615
+        },
+        "duration_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615,
+          "description": "0 where the platform has no clock (wasm32-unknown-unknown)."
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "PASS"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "valid": {
+            "const": true
+          },
+          "violations": {
+            "maxItems": 0
+          },
+          "errors": {
+            "maxItems": 0
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "valid": {
+            "const": false
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "REJECT"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "violations": {
+            "minItems": 1
+          },
+          "errors": {
+            "maxItems": 0
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "ERROR"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "errors": {
+            "minItems": 1
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "rule_id": {
+      "type": "string",
+      "pattern": "^[A-Z0-9]+\\.[A-Z0-9_]+$"
+    },
+    "violation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rule_id",
+        "category",
+        "severity",
+        "action",
+        "message",
+        "count",
+        "locations"
+      ],
+      "properties": {
+        "rule_id": {
+          "$ref": "#/$defs/rule_id"
+        },
+        "category": {
+          "enum": [
+            "filetype",
+            "postscript",
+            "active_content",
+            "embedded",
+            "external",
+            "forms",
+            "xml",
+            "structure",
+            "encryption",
+            "codecs",
+            "resource"
+          ]
+        },
+        "severity": {
+          "enum": [
+            "critical",
+            "high",
+            "medium",
+            "low",
+            "info"
+          ]
+        },
+        "action": {
+          "enum": [
+            "block",
+            "warn"
+          ]
+        },
+        "message": {
+          "type": "string"
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Every hit, including those beyond the kept locations."
+        },
+        "locations": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "$ref": "#/$defs/location"
+          }
+        }
+      }
+    },
+    "location": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "object": {
+          "type": "string",
+          "pattern": "^[0-9]+ [0-9]+$",
+          "description": "\"N G\" of the object."
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615,
+          "description": "Byte offset in the file (object, its object stream, or the finding)."
+        },
+        "source": {
+          "type": "string",
+          "pattern": "^(file|objstm(:[0-9]+)?)$"
+        },
+        "path": {
+          "type": "string",
+          "description": "From the object to the nested dictionary, e.g. /AA/O or /Annots[2]."
+        },
+        "op_offset": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615,
+          "description": "Offset of a content operator in the decoded stream."
+        },
+        "detail": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

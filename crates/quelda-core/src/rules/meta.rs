@@ -1,7 +1,11 @@
 //! Rule metadata (design §5.2) and the enums policy keys use (§5.6, §6).
+//! The serde names of the enums are the policy/verdict JSON keys.
+
+use serde::{Deserialize, Serialize};
 
 /// Rule category: the stable key policies use (design §5.6).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Category {
     Filetype,
     Postscript,
@@ -70,7 +74,8 @@ impl Category {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Severity {
     Critical,
     High,
@@ -92,7 +97,8 @@ impl Severity {
 }
 
 /// What a resolved rule does (design §6). Ordered `Off < Warn < Block`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Action {
     Off,
     Warn,
@@ -111,7 +117,8 @@ impl Action {
 
 /// Rollout stage (design §6.4): a preview rule is at most `warn` unless the
 /// policy names it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Stage {
     Preview,
     Stable,
@@ -198,6 +205,24 @@ mod tests {
         }
         assert_eq!(Category::from_key("ACTIVE"), None);
         assert_eq!(Category::from_key(""), None);
+    }
+
+    #[test]
+    fn serde_names_are_keys() {
+        let json = |v: serde_json::Value| v.as_str().unwrap_or_default().to_string();
+        for c in Category::ALL {
+            assert_eq!(json(serde_json::json!(c)), c.key());
+            let back: Category = serde_json::from_value(serde_json::json!(c.key())).unwrap();
+            assert_eq!(back, c);
+        }
+        for a in [Action::Off, Action::Warn, Action::Block] {
+            assert_eq!(json(serde_json::json!(a)), a.key());
+        }
+        for s in [Severity::Critical, Severity::High, Severity::Info] {
+            assert_eq!(json(serde_json::json!(s)), s.key());
+        }
+        assert_eq!(json(serde_json::json!(Stage::Preview)), "preview");
+        assert!(serde_json::from_str::<Action>("\"Block\"").is_err());
     }
 
     #[test]
