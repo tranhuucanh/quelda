@@ -19,7 +19,7 @@ const comparable = (v: Verdict | string): unknown => {
 };
 
 /** The same bytes as each input kind the API accepts. */
-function asInput(bytes: Uint8Array, kind: number): ScanInput {
+function asInput(bytes: Uint8Array<ArrayBuffer>, kind: number): ScanInput {
   switch (kind % 5) {
     case 0:
       return bytes.slice().buffer;
@@ -40,8 +40,8 @@ function asInput(bytes: Uint8Array, kind: number): ScanInput {
 let g: Golden;
 let module: WebAssembly.Module;
 let scanner: Scanner;
-const files = new Map<string, Uint8Array>();
-const bytesOf = (file: string): Uint8Array => {
+const files = new Map<string, Uint8Array<ArrayBuffer>>();
+const bytesOf = (file: string): Uint8Array<ArrayBuffer> => {
   let b = files.get(file);
   if (b === undefined) {
     b = fixture(file);

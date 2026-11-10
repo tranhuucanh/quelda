@@ -2,3 +2,4 @@
 /LICENSE-MIT
 /LICENSE-APACHE
 *.tgz
+/examples/*/dist/

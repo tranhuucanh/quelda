@@ -53,6 +53,6 @@ export function golden(): Golden {
 }
 
 /** Fixture bytes as a plain Uint8Array owning its buffer (a Node Buffer may be a pooled view). */
-export function fixture(file: string): Uint8Array {
+export function fixture(file: string): Uint8Array<ArrayBuffer> {
   return new Uint8Array(readFileSync(join(TESTS, 'fixtures', file)));
 }
