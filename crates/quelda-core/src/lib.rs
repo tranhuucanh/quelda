@@ -71,7 +71,7 @@ pub fn scan(input: &[u8], policy: &Policy) -> Verdict {
 pub fn scan_json(input: &[u8], policy_json: &str) -> String {
     match Policy::from_json(policy_json) {
         Ok(policy) => scan(input, &policy),
-        Err(e) => invalid_policy(e, input.len() as u64),
+        Err(e) => policy_error(&e, input.len() as u64),
     }
     .to_json()
 }
@@ -89,7 +89,7 @@ pub fn scan_source(source: &dyn Source, policy: &Policy) -> Verdict {
 pub fn scan_source_json(source: &dyn Source, policy_json: &str) -> String {
     match Policy::from_json(policy_json) {
         Ok(policy) => scan_source(source, &policy),
-        Err(e) => invalid_policy(e, source.len()),
+        Err(e) => policy_error(&e, source.len()),
     }
     .to_json()
 }
@@ -98,23 +98,31 @@ pub fn scan_source_json(source: &dyn Source, policy_json: &str) -> String {
 /// JS reader without a valid `size`): `ERROR` with `ENGINE.READ`.
 pub fn read_error_json(message: &str, policy_json: &str) -> String {
     match Policy::from_json(policy_json) {
-        Ok(policy) => scan_with(Err(message.to_string()), 0, &policy, rules::registry::all()),
-        Err(e) => invalid_policy(e, 0),
+        Ok(policy) => read_error(message, &policy),
+        Err(e) => policy_error(&e, 0),
     }
     .to_json()
+}
+
+/// [`read_error_json`] with a parsed policy (CLI: a file that does not open).
+pub fn read_error(message: &str, policy: &Policy) -> Verdict {
+    scan_with(Err(message.to_string()), 0, policy, rules::registry::all())
+}
+
+/// The verdict for a policy that cannot be used — JSON that does not parse,
+/// or (CLI) a policy file that cannot be read: `ERROR` with
+/// `POLICY.INVALID`. `bytes` is the input size, for `stats`.
+pub fn policy_error(error: &policy::PolicyError, bytes: u64) -> Verdict {
+    Verdict::error(
+        &verdict::issue(IssueCode::PolicyInvalid, error.0.clone()),
+        PolicyInfo::unknown(),
+        bytes,
+    )
 }
 
 fn scan_source_tuned(source: &dyn Source, policy: &Policy, tuning: Tuning) -> Verdict {
     let input = Input::source(source, tuning);
     scan_with(input, source.len(), policy, rules::registry::all())
-}
-
-fn invalid_policy(e: policy::PolicyError, bytes: u64) -> Verdict {
-    Verdict::error(
-        &verdict::issue(IssueCode::PolicyInvalid, e.0),
-        PolicyInfo::unknown(),
-        bytes,
-    )
 }
 
 /// [`scan`] over a given rule set (tests inject probe rules). `input` is
@@ -343,6 +351,31 @@ mod tests {
         );
         assert_eq!(v.warnings[0].count, 2);
         assert_eq!(v.status, Status::Pass);
+    }
+
+    #[test]
+    fn read_error_and_policy_error_verdicts() {
+        let p = policy(r#"{"preset": "strict"}"#);
+        let v = read_error("no such file", &p);
+        assert_eq!(v.status, Status::Error);
+        assert!(!v.valid);
+        assert_eq!(v.errors[0].code, "ENGINE.READ");
+        assert_eq!(v.errors[0].message, "no such file");
+        assert_eq!(v.policy.preset, Some(policy::Preset::Strict));
+        assert_eq!(
+            v.to_json(),
+            read_error_json("no such file", r#"{"preset": "strict"}"#)
+        );
+        // An invalid policy wins over the read error.
+        let bad = policy(r#"{"rules": {"NOPE.X": "off"}}"#);
+        assert_eq!(read_error("x", &bad).errors[0].code, "POLICY.INVALID");
+
+        let v = policy_error(&policy::PolicyError("cannot read p.json".into()), 7);
+        assert_eq!(v.status, Status::Error);
+        assert_eq!(v.errors[0].code, "POLICY.INVALID");
+        assert_eq!(v.errors[0].message, "cannot read p.json");
+        assert_eq!(v.stats.bytes, 7);
+        assert_eq!(v.policy.digest, None);
     }
 
     #[test]

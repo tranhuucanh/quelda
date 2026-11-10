@@ -6,6 +6,8 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
 
 [[bin]]
 name = "quelda"
@@ -13,3 +15,8 @@ path = "src/main.rs"
 
 [dependencies]
 quelda-core.workspace = true
+serde_json = "1.0.154"
+
+[dev-dependencies]
+assert_cmd = "2"
+jsonschema = { version = "0.61.0", default-features = false }

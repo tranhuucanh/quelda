@@ -13,7 +13,9 @@ version = "0.0.0"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT OR Apache-2.0"
-authors = ["The quelda authors"]
+authors = ["0xTh3OKrypt <tranhuucanh39@gmail.com>"]
+repository = "https://github.com/tranhuucanh/quelda"
+homepage = "https://github.com/tranhuucanh/quelda"
 description = "PDF security scanner: one PDF + policy in, verdict out"
 
 [workspace.dependencies]
