@@ -229,6 +229,11 @@ impl Document {
             .filter_map(|&i| self.objects.get(i))
     }
 
+    /// Indices into [`Document::objects`] of every definition of `id`.
+    pub fn definition_indices(&self, id: ObjRef) -> impl Iterator<Item = usize> + '_ {
+        self.by_id.get(&id).into_iter().flatten().copied()
+    }
+
     /// The trailer dictionary of revision `r`.
     pub fn revision_trailer(&self, r: usize) -> Option<&Dict> {
         let s = self.revisions.get(r)?.section;
