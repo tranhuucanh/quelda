@@ -1,5 +1,4 @@
 /src/wasm/
-/LICENSE-MIT
-/LICENSE-APACHE
+/LICENSE
 *.tgz
 /examples/*/dist/

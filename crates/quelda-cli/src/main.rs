@@ -30,6 +30,7 @@ const COMMIT: &str = env!("QUELDA_BUILD_COMMIT");
 const BUILD_DATE: &str = env!("QUELDA_BUILD_DATE");
 const AUTHORS: &str = env!("CARGO_PKG_AUTHORS");
 const HOMEPAGE: &str = env!("CARGO_PKG_REPOSITORY");
+const LICENSE: &str = env!("CARGO_PKG_LICENSE");
 
 const HELP: &str = "\
 quelda — PDF security scanner: one PDF + policy in, verdict out
@@ -164,7 +165,7 @@ fn version(format: Format) -> String {
     let engine = quelda_core::version();
     match format {
         Format::Text => format!(
-            "quelda {engine}\ncommit:  {COMMIT}\nbuilt:   {BUILD_DATE}\nrules:   {rules}\nauthors: {}\nlicense: MIT OR Apache-2.0\nhome:    {HOMEPAGE}\n",
+            "quelda {engine}\ncommit:  {COMMIT}\nbuilt:   {BUILD_DATE}\nrules:   {rules}\nauthors: {}\nlicense: {LICENSE}\nhome:    {HOMEPAGE}\n",
             AUTHORS.replace(':', ", ")
         ),
         Format::Json => format!(
@@ -175,7 +176,7 @@ fn version(format: Format) -> String {
                 "build_date": BUILD_DATE,
                 "rules": rules,
                 "authors": AUTHORS.split(':').collect::<Vec<_>>(),
-                "license": "MIT OR Apache-2.0",
+                "license": LICENSE,
                 "homepage": HOMEPAGE,
             })
         ),

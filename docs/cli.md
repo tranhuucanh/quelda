@@ -15,8 +15,8 @@ processor.
 
 ## Install
 
-Prebuilt binaries: **Linux x64 and arm64** (static, any distribution, even a `scratch`
-container) and **macOS on Apple Silicon**. On other platforms, build from source (below).
+One static binary, no dependencies: **Linux x64 and arm64** (any distribution, even a `scratch`
+or distroless container) and **macOS on Apple Silicon**.
 
 ### Homebrew (macOS, Linux)
 
@@ -24,16 +24,52 @@ container) and **macOS on Apple Silicon**. On other platforms, build from source
 brew install tranhuucanh/quelda/quelda
 ```
 
-This adds the tap and installs in one step. The two-step form does the same:
+### Linux server (one command)
 
+<!-- install: linux -->
 ```bash
-brew tap tranhuucanh/quelda
-brew install quelda
+curl -fsSL "https://github.com/tranhuucanh/quelda/releases/latest/download/quelda-$(uname -m)-unknown-linux-musl.tar.gz" | sudo tar -xz -C /usr/local/bin quelda
+quelda --version
 ```
 
-### Download
+`$(uname -m)` picks the right binary (`x86_64` or `aarch64`).
 
-Pick the archive for your platform:
+### Docker (ECS, Kubernetes, Cloud Run, …)
+
+Add a stage to your Dockerfile and copy the binary into your image. It works for
+`linux/amd64` and `linux/arm64` (AWS Graviton) builds, and with any base image (Debian, Ubuntu,
+Alpine, distroless):
+
+<!-- install: docker -->
+```dockerfile
+FROM alpine:3.20 AS quelda
+RUN wget -qO- "https://github.com/tranhuucanh/quelda/releases/latest/download/quelda-$(uname -m)-unknown-linux-musl.tar.gz" | tar -xz -C /usr/local/bin quelda
+
+FROM your-app-image
+COPY --from=quelda /usr/local/bin/quelda /usr/local/bin/quelda
+```
+
+Then call `quelda` from your application as shown in
+[Call it from your backend](#call-it-from-your-backend).
+
+### Pin a version
+
+`latest` is the newest release. In production, pin one: replace `releases/latest/download/`
+with `releases/download/vX.Y.Z/` (see [Releases](https://github.com/tranhuucanh/quelda/releases)),
+and upgrade the server and the browser package together
+(see [Keep every engine on the same rule set](#keep-every-engine-on-the-same-rule-set)).
+
+### Verify a download
+
+Each release has `SHA256SUMS` and a signed build provenance attestation:
+
+```bash
+asset=quelda-x86_64-unknown-linux-musl.tar.gz
+curl -fsSLO "https://github.com/tranhuucanh/quelda/releases/latest/download/$asset"
+curl -fsSLO https://github.com/tranhuucanh/quelda/releases/latest/download/SHA256SUMS
+sha256sum -c SHA256SUMS --ignore-missing
+gh attestation verify "$asset" --repo tranhuucanh/quelda
+```
 
 | Platform | Archive |
 |---|---|
@@ -41,37 +77,9 @@ Pick the archive for your platform:
 | Linux arm64 | `quelda-aarch64-unknown-linux-musl.tar.gz` |
 | macOS, Apple Silicon | `quelda-aarch64-apple-darwin.tar.gz` |
 
-```bash
-asset=quelda-x86_64-unknown-linux-musl.tar.gz
-curl -fsSLO "https://github.com/tranhuucanh/quelda/releases/latest/download/$asset"
-curl -fsSLO https://github.com/tranhuucanh/quelda/releases/latest/download/SHA256SUMS
-sha256sum -c SHA256SUMS --ignore-missing    # macOS: shasum -a 256 -c SHA256SUMS --ignore-missing
-tar -xzf "$asset" quelda
-sudo install -m 0755 quelda /usr/local/bin/quelda
-quelda --version
-```
-
-Each archive also has a signed build provenance attestation. With the GitHub CLI:
-`gh attestation verify "$asset" --repo tranhuucanh/quelda`.
-
-`latest` always points to the newest release. To pin one in production, replace
-`releases/latest/download/` with `releases/download/vX.Y.Z/`, and keep the server and the npm
-package on the same version (see [Policy](#keep-every-engine-on-the-same-rule-set)).
-
-In a container image:
-
-```dockerfile
-FROM alpine:3.20 AS quelda
-ADD https://github.com/tranhuucanh/quelda/releases/latest/download/quelda-x86_64-unknown-linux-musl.tar.gz /tmp/quelda.tar.gz
-RUN tar -xzf /tmp/quelda.tar.gz -C /usr/local/bin quelda
-
-FROM your-app-image
-COPY --from=quelda /usr/local/bin/quelda /usr/local/bin/quelda
-```
-
 ### From source
 
-With Rust (stable, via [rustup](https://rustup.rs)):
+With Rust (stable, via [rustup](https://rustup.rs)), on any platform Rust supports:
 
 ```bash
 cargo install --locked --git https://github.com/tranhuucanh/quelda quelda-cli

@@ -34,5 +34,5 @@ execFileSync(process.execPath, [join(pkg, 'node_modules/typescript/bin/tsc'), '-
 const distWasm = join(pkg, 'dist/wasm');
 mkdirSync(distWasm, { recursive: true });
 for (const f of GLUE) copyFileSync(join(srcWasm, f), join(distWasm, f));
-for (const f of ['LICENSE-MIT', 'LICENSE-APACHE']) copyFileSync(join(root, f), join(pkg, f));
+for (const f of ['LICENSE']) copyFileSync(join(root, f), join(pkg, f));
 console.log(`build: dist/ ready (engine from ${wasmPkg})`);
