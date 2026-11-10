@@ -106,7 +106,9 @@ jobs:
         run: node scripts/cli-dist-test.mjs --bin "target/${{ matrix.target }}/release/quelda"
       - name: test the binary in containers
         if: matrix.platform
-        run: node scripts/cli-dist-test.mjs --bin "target/${{ matrix.target }}/release/quelda" --docker ${{ matrix.platform }}
+        run: |
+          node scripts/cli-dist-test.mjs --bin "target/${{ matrix.target }}/release/quelda" --docker ${{ matrix.platform }}
+          node scripts/docs-examples-test.mjs --bin "target/${{ matrix.target }}/release/quelda" --docker ${{ matrix.platform }}
       - name: package
         run: |
           mkdir -p stage dist

@@ -34,7 +34,8 @@ jobs:
         run: cargo build -p quelda-core -p quelda-wasm --target wasm32-unknown-unknown --profile release-wasm
 
   # CLI as released (plan Step 14): static musl binary, tested in containers
-  # (scratch, alpine, debian, ubuntu, busybox) against every golden case.
+  # (scratch, alpine, debian, ubuntu, busybox) against every golden case, and
+  # the caller examples of docs/cli.md in each language's image.
   cli:
     runs-on: ubuntu-latest
     env:
@@ -60,6 +61,8 @@ jobs:
         run: |
           node scripts/cli-dist-test.mjs --bin target/x86_64-unknown-linux-musl/release/quelda
           node scripts/cli-dist-test.mjs --bin target/x86_64-unknown-linux-musl/release/quelda --docker linux/amd64
+      - name: docs/cli.md caller examples (Python, Ruby, Node, Go, PHP, Java images)
+        run: node scripts/docs-examples-test.mjs --bin target/x86_64-unknown-linux-musl/release/quelda --docker linux/amd64
 
   # Throughput gate (plan Step 16, ADR #29): PR head vs its base on the same
   # runner; fails on a verdict change or > 15 % slower on a heavy file.
