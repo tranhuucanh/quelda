@@ -10,5 +10,43 @@
     "security",
     "scanner",
     "webassembly"
-  ]
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "sideEffects": [
+    "./dist/worker.js"
+  ],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./worker.js": "./dist/worker.js",
+    "./quelda_bg.wasm": "./dist/wasm/quelda_bg.wasm",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist/**/*.js",
+    "dist/**/*.d.ts",
+    "dist/wasm/quelda_bg.wasm",
+    "LICENSE-MIT",
+    "LICENSE-APACHE"
+  ],
+  "scripts": {
+    "build:wasm": "../../scripts/wasm-build.sh",
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc -p tsconfig.test.json",
+    "test": "node scripts/build.mjs && tsc -p tsconfig.test.json && vitest run",
+    "test:examples": "node scripts/build-examples.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.1",
+    "ajv": "8.20.0",
+    "typescript": "5.9.3",
+    "vite": "7.3.7",
+    "vitest": "4.1.12"
+  }
 }

@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:quelda:schema:rules:1",
+  "title": "quelda rule list",
+  "description": "Output of list_rules / list_rules_json (design §5.2, §8.1): every rule the engine knows, sorted by id. For settings screens and for filtering a policy to the rules an engine knows. Version 1.",
+  "type": "array",
+  "items": {
+    "$ref": "#/$defs/rule"
+  },
+  "$defs": {
+    "rule_id": {
+      "type": "string",
+      "pattern": "^[A-Z0-9]+\\.[A-Z0-9_]+$"
+    },
+    "rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "category",
+        "severity",
+        "default_action",
+        "locked",
+        "stage",
+        "since",
+        "message",
+        "description"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/rule_id",
+          "description": "CATEGORY.NAME, stable forever, never reused."
+        },
+        "category": {
+          "enum": [
+            "filetype",
+            "postscript",
+            "active_content",
+            "embedded",
+            "external",
+            "forms",
+            "xml",
+            "structure",
+            "encryption",
+            "codecs",
+            "resource"
+          ]
+        },
+        "severity": {
+          "enum": [
+            "critical",
+            "high",
+            "medium",
+            "low",
+            "info"
+          ]
+        },
+        "default_action": {
+          "enum": [
+            "block",
+            "warn",
+            "off"
+          ],
+          "description": "Action in the balanced preset."
+        },
+        "locked": {
+          "type": "boolean",
+          "description": "Policy cannot lower it below block (except unsafe_allow_unlock)."
+        },
+        "stage": {
+          "enum": [
+            "preview",
+            "stable"
+          ],
+          "description": "A preview rule is at most warn unless the policy names it."
+        },
+        "since": {
+          "type": "string",
+          "description": "Engine version that added the rule."
+        },
+        "message": {
+          "type": "string",
+          "description": "Short reason shown to users (English)."
+        },
+        "description": {
+          "type": "string",
+          "description": "Longer explanation and references."
+        }
+      }
+    }
+  }
+}
