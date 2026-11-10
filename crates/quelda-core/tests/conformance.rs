@@ -2,10 +2,9 @@
 //! and every fixture of `tests/fixtures/manifest.json` × preset, through the
 //! public JSON API (`scan_json`), as a binding would call it.
 //!
-//! Expectations are written for the whole v0.1 rule set; rules not yet
-//! registered are left out and `PASS`/`REJECT` is recomputed from the rest.
-//! A case whose policy names an unregistered rule is skipped (the engine
-//! rejects unknown rule IDs with `POLICY.INVALID`).
+//! Expectations are written for the whole v0.1 rule set (design §5.7), and
+//! the engine registers all of it: every case runs, none is skipped, and the
+//! expected rule lists are compared as they are.
 
 use std::collections::BTreeSet;
 use std::fs;
@@ -26,8 +25,13 @@ fn tests_dir(sub: &str) -> PathBuf {
     dir
 }
 
-fn registered() -> BTreeSet<&'static str> {
-    list_rules().iter().map(|r| r.id).collect()
+/// The registry is exactly the v0.1 rule set the expectations are written for.
+#[test]
+fn registry_is_the_whole_v01_rule_set() {
+    let registered: BTreeSet<&str> = list_rules().iter().map(|r| r.id).collect();
+    let spec: BTreeSet<&str> = quelda_testkit::rules::RULES.iter().map(|r| r.id).collect();
+    assert_eq!(registered, spec);
+    assert_eq!(registered.len(), 39);
 }
 
 fn ids(v: &Value) -> Vec<String> {
@@ -44,14 +48,6 @@ fn ids(v: &Value) -> Vec<String> {
                 .collect()
         })
         .unwrap_or_default()
-}
-
-/// Expected rule IDs restricted to registered rules.
-fn known(v: &Value, reg: &BTreeSet<&str>) -> Vec<String> {
-    ids(v)
-        .into_iter()
-        .filter(|id| reg.contains(id.as_str()))
-        .collect()
 }
 
 fn error_codes(verdict: &Value) -> Vec<String> {
@@ -121,7 +117,6 @@ fn check(
 fn conformance_cases() {
     let dir = tests_dir("conformance");
     let fixtures = tests_dir("fixtures");
-    let reg = registered();
     let mut files: Vec<_> = fs::read_dir(&dir)
         .unwrap()
         .filter_map(|e| e.ok().map(|e| e.path()))
@@ -130,17 +125,10 @@ fn conformance_cases() {
     files.sort();
     assert!(files.len() >= 20, "only {} cases", files.len());
     let mut problems = Vec::new();
-    let mut skipped = Vec::new();
+    let mut ran = 0;
     for path in &files {
         let case: Value = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
         let name = case["name"].as_str().unwrap_or("?");
-        let names_unregistered = case["policy"]["rules"]
-            .as_object()
-            .is_some_and(|r| r.keys().any(|id| !reg.contains(id.as_str())));
-        if names_unregistered {
-            skipped.push(name.to_string());
-            continue;
-        }
         let policy = match case.get("policy_raw") {
             Some(raw) => raw.as_str().unwrap_or_default().to_string(),
             None => case["policy"].to_string(),
@@ -154,13 +142,14 @@ fn conformance_cases() {
             &verdict,
             exp["status"].as_str().unwrap_or_default(),
             exp["error"].as_str(),
-            &known(&exp["violations"], &reg),
-            &known(&exp["warnings"], &reg),
+            &ids(&exp["violations"]),
+            &ids(&exp["warnings"]),
             true,
         ));
+        ran += 1;
     }
-    eprintln!("skipped (policy names unregistered rules): {skipped:?}");
-    assert!(files.len() - skipped.len() >= 20);
+    // No skip mechanism: every case file ran.
+    assert_eq!(ran, files.len());
     assert!(problems.is_empty(), "\n{}", problems.join("\n"));
 }
 
@@ -169,7 +158,6 @@ fn manifest_every_fixture_every_preset() {
     let dir = tests_dir("fixtures");
     let manifest: Value =
         serde_json::from_slice(&fs::read(dir.join("manifest.json")).unwrap()).unwrap();
-    let reg = registered();
     let mut problems = Vec::new();
     let mut n = 0;
     for (path, f) in manifest["files"].as_object().unwrap() {
@@ -184,8 +172,8 @@ fn manifest_every_fixture_every_preset() {
                 &verdict,
                 exp["status"].as_str().unwrap_or_default(),
                 f["engine_error"].as_str(),
-                &known(&exp["violations"], &reg),
-                &known(&exp["warnings"], &reg),
+                &ids(&exp["violations"]),
+                &ids(&exp["warnings"]),
                 exact,
             ));
             n += 1;

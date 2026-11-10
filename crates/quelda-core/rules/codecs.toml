@@ -1,0 +1,15 @@
+# Declarative rules, category `codecs` (design §5.4, §5.7). `CODEC.JBIG2` and
+# `CODEC.JPX` are code rules (`src/rules/codecs/`): `/Filter` may be an array
+# (with indirect elements), and inline images name their filters too.
+
+[[rule]]
+id = "CODEC.TYPE1_FONT"
+category = "codecs"
+severity = "low"
+default_action = "off"
+locked = false
+stage = "stable"
+since = "0.1.0"
+message = "Document embeds a Type 1 font program"
+description = "A font descriptor with a /FontFile key (ISO 32000-2 §9.9): an embedded Type 1 (PostScript charstring) font program. Type 1 interpreters have a long exploit history, but print files use them a lot: strict warns, balanced and permissive are off. /FontFile2 (TrueType) and /FontFile3 (CFF, OpenType) are not counted."
+match = { dict = { key = "FontFile" } }
