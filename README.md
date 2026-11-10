@@ -13,6 +13,18 @@ The core engine is written in Rust and ships in two forms:
 
 > **Status:** early development, not usable yet.
 
+## Supported files
+
+quelda identifies a file by its content, not by its extension.
+
+- **PDF** and **modern Adobe Illustrator `.ai` files** (Illustrator 9 and later, which are PDF
+  files with extra Illustrator data) are scanned.
+- **PostScript, EPS and legacy `.ai` files** (Illustrator 8 and earlier, which are PostScript)
+  are **always rejected** with `FILETYPE.POSTSCRIPT_MAGIC`. This is a locked rule. PostScript is
+  a full programming language, so a static scan cannot prove it safe, and it is the main way
+  attackers reach Ghostscript. If you must accept EPS, handle it outside quelda: use its
+  embedded preview image, or convert it to PDF in a locked-down sandbox and scan the result.
+
 ## Development
 
 ```bash

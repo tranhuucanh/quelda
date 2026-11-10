@@ -14,6 +14,13 @@ does not block the page.
 > `quelda` CLI, coming soon) before a file reaches Ghostscript, ImageMagick or any other PDF
 > processor.
 
+## Supported files
+
+Files are identified by content, not by extension. PDF and modern Adobe Illustrator `.ai`
+files (Illustrator 9 and later, which are PDF inside) are scanned. PostScript, EPS and legacy
+`.ai` files (Illustrator 8 and earlier) are always rejected with `FILETYPE.POSTSCRIPT_MAGIC`,
+a locked rule: quelda does not scan PostScript.
+
 ## Usage
 
 ```ts
