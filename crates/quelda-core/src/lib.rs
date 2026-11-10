@@ -2,13 +2,15 @@
 //!
 //! Layers (design §4): parser → facts → rules → policy. So far: the lexer,
 //! object model and union object set (`parser`, `parser::Document`), stream
-//! decoding (`filters`), engine issues and limits.
+//! decoding (`filters`), the facts layer rules read (`facts::Ctx`), engine
+//! issues, limits and thresholds.
 
 #![forbid(unsafe_code)]
 // Input must never be able to crash the engine (design: fail-closed, no panics).
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 pub mod error;
+pub mod facts;
 pub mod filters;
 pub mod limits;
 pub mod parser;

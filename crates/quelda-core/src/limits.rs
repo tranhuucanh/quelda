@@ -1,6 +1,7 @@
 //! Engine limits (design §4.5): guardrails, not rules. Exceeding one is an
 //! engine issue (`LIMIT.*` → `ERROR`). Only the limits the engine enforces so
-//! far are here; the rest arrive with the steps that use them.
+//! far are here; the rest arrive with the steps that use them. Detection
+//! [`Thresholds`] live here too: both come from the policy.
 //!
 //! Default values are provisional until measured on real files (Q6, Step 13).
 
@@ -65,6 +66,35 @@ impl Limits {
     /// Nesting depth actually enforced.
     pub fn nesting_depth(&self) -> usize {
         self.max_nesting_depth.min(HARD_MAX_NESTING_DEPTH) as usize
+    }
+}
+
+/// Detection thresholds configured by policy (`thresholds` object, design
+/// §4.5). Unlike [`Limits`], exceeding one is a rule finding, not an engine
+/// issue; rules read them through `Ctx::thresholds`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Thresholds {
+    /// Width × height of one image (`RESOURCE.IMAGE_DIMENSIONS`).
+    pub max_image_pixels: u64,
+    /// Longest side of a page box × `UserUnit`, in points (`RESOURCE.PAGE_SIZE`).
+    pub max_page_side_pt: f64,
+    /// Pages in the page tree (`RESOURCE.PAGE_COUNT`).
+    pub max_pages: u64,
+    /// Filters on one stream (`STRUCT.FILTER_CHAIN`).
+    pub max_filter_chain: u32,
+    /// Bytes after the last `%%EOF` (`STRUCT.TRAILING_DATA`).
+    pub max_trailing_bytes: u64,
+}
+
+impl Default for Thresholds {
+    fn default() -> Self {
+        Thresholds {
+            max_image_pixels: 1_000_000_000,
+            max_page_side_pt: 28_800.0,
+            max_pages: 10_000,
+            max_filter_chain: 2,
+            max_trailing_bytes: 1024,
+        }
     }
 }
 
@@ -134,6 +164,16 @@ impl Budget {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn default_thresholds() {
+        let t = Thresholds::default();
+        assert_eq!(t.max_image_pixels, 1_000_000_000);
+        assert_eq!(t.max_page_side_pt, 28_800.0);
+        assert_eq!(t.max_pages, 10_000);
+        assert_eq!(t.max_filter_chain, 2);
+        assert_eq!(t.max_trailing_bytes, 1024);
+    }
 
     #[test]
     fn default_depth() {
