@@ -16,6 +16,8 @@ allow = [
     "Unicode-DFS-2016",
 ]
 confidence-threshold = 0.93
+# The allowlist is policy, not inventory: don't warn about licenses no dependency uses yet.
+unused-allowed-license = "allow"
 
 [licenses.private]
 # Unpublished workspace crates (quelda-testkit) are not distributed.
