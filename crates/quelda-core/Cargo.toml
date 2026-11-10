@@ -8,3 +8,7 @@ license.workspace = true
 authors.workspace = true
 
 [dependencies]
+
+[dev-dependencies]
+# In-memory fixtures (testkit never depends on core: writer ≠ parser).
+quelda-testkit = { path = "../quelda-testkit" }
