@@ -581,6 +581,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "quelda-eval"
+version = "0.0.0"
+dependencies = [
+ "quelda-core",
+ "serde_json",
+]
+
+[[package]]
 name = "quelda-testkit"
 version = "0.0.0"
 dependencies = [

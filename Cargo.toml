@@ -5,6 +5,7 @@ members = [
     "crates/quelda-wasm",
     "crates/quelda-cli",
     "crates/quelda-testkit",
+    "crates/quelda-eval",
 ]
 
 [workspace.package]
