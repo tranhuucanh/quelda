@@ -37,6 +37,8 @@ pub enum DictMatch {
     Int { key: &'static str, value: i64 },
     /// Every condition holds on the same dictionary.
     All(&'static [DictMatch]),
+    /// At least one condition holds.
+    Any(&'static [DictMatch]),
 }
 
 impl DictMatch {
@@ -59,6 +61,7 @@ impl DictMatch {
                 })
             }
             DictMatch::All(all) => all.iter().all(|m| m.matches(dict, ctx)),
+            DictMatch::Any(any) => any.iter().any(|m| m.matches(dict, ctx)),
         }
     }
 }
@@ -203,6 +206,29 @@ mod tests {
         let src = b"1 0 obj << /Type /EmbeddedFile /Length 0 >> stream\n\nendstream endobj\n\
             2 0 obj << /Type /EmbeddedFile >> endobj\n3 0 obj << /Length 1 /A << /Type /EmbeddedFile >> >> endobj";
         assert_eq!(dict(DictMatch::All(&ALL), src), vec!["1 0 0"]);
+    }
+
+    #[test]
+    fn any() {
+        static ANY: [DictMatch; 2] = [
+            DictMatch::Key("JS"),
+            DictMatch::Name {
+                key: "S",
+                name: "JavaScript",
+            },
+        ];
+        static NESTED: [DictMatch; 2] = [DictMatch::Any(&ANY), DictMatch::Key("Next")];
+        let src = b"1 0 obj << /JS (x) >> endobj\n\
+            2 0 obj << /S /JavaScript >> endobj\n\
+            3 0 obj << /S /Java#53cript /JS (x) >> endobj\n\
+            4 0 obj << /S /GoTo /JSX 1 >> endobj\n\
+            5 0 obj << /S 6 0 R /Next 1 >> endobj\n\
+            6 0 obj /JavaScript endobj";
+        assert_eq!(
+            dict(DictMatch::Any(&ANY), src),
+            vec!["1 0 0", "2 0 0", "3 0 0", "5 0 0"]
+        );
+        assert_eq!(dict(DictMatch::All(&NESTED), src), vec!["5 0 0"]);
     }
 
     #[test]

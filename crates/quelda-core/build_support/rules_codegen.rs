@@ -77,6 +77,7 @@ pub enum DictSpec {
     NameIn { key: String, names: Vec<String> },
     Int { key: String, value: i64 },
     All(Vec<DictSpec>),
+    Any(Vec<DictSpec>),
 }
 
 /// `^[A-Z0-9]+\.[A-Z0-9_]+$` (design §5.5).
@@ -306,24 +307,32 @@ fn is_operator(op: &str) -> bool {
 
 fn parse_dict(v: &toml::Value) -> Result<DictSpec, String> {
     let t = v.as_table().ok_or("`dict` must be a table")?;
-    if let Some(all) = t.get("all") {
+    for combinator in ["all", "any"] {
+        let Some(list) = t.get(combinator) else {
+            continue;
+        };
         if t.len() != 1 {
-            return Err("`all` cannot be combined with other fields".into());
+            return Err(format!(
+                "`{combinator}` cannot be combined with other fields"
+            ));
         }
-        let items = all.as_array().ok_or("`all` must be an array of tables")?;
+        let items = list
+            .as_array()
+            .ok_or(format!("`{combinator}` must be an array of tables"))?;
         if items.is_empty() {
-            return Err("`all` must not be empty".into());
+            return Err(format!("`{combinator}` must not be empty"));
         }
-        return items
-            .iter()
-            .map(parse_dict)
-            .collect::<Result<_, _>>()
-            .map(DictSpec::All);
+        let items = items.iter().map(parse_dict).collect::<Result<_, _>>()?;
+        return Ok(if combinator == "all" {
+            DictSpec::All(items)
+        } else {
+            DictSpec::Any(items)
+        });
     }
     for k in t.keys() {
         if !["key", "name", "name_in", "int"].contains(&k.as_str()) {
             return Err(format!(
-                "unknown field `{k}` (expected key, name, name_in, int, all)"
+                "unknown field `{k}` (expected key, name, name_in, int, all, any)"
             ));
         }
     }
@@ -470,8 +479,13 @@ fn dict_code(d: &DictSpec, out: &mut String) {
         DictSpec::Int { key, value } => {
             let _ = write!(out, "{p}::Int {{ key: {key:?}, value: {value} }}");
         }
-        DictSpec::All(items) => {
-            let _ = write!(out, "{p}::All(&[");
+        DictSpec::All(items) | DictSpec::Any(items) => {
+            let kind = if matches!(d, DictSpec::All(_)) {
+                "All"
+            } else {
+                "Any"
+            };
+            let _ = write!(out, "{p}::{kind}(&[");
             for i in items {
                 dict_code(i, out);
                 out.push_str(", ");
@@ -782,6 +796,18 @@ match = { dict = { key = "S", name = "Launch" } }
             ])))
         );
         assert_eq!(
+            matcher(
+                r#"{ dict = { any = [ { key = "JS" }, { all = [ { key = "S", name = "JavaScript" } ] } ] } }"#
+            ),
+            Ok(MatchSpec::Dict(Any(vec![
+                Key(k("JS")),
+                All(vec![Name {
+                    key: k("S"),
+                    name: k("JavaScript")
+                }])
+            ])))
+        );
+        assert_eq!(
             matcher(r#"{ content_op = "PS" }"#),
             Ok(MatchSpec::ContentOp(k("PS")))
         );
@@ -822,6 +848,20 @@ match = { dict = { key = "S", name = "Launch" } }
                 "cannot be combined",
             ),
             (r#"{ dict = { all = [ { name = "A" } ] } }"#, "`key`"),
+            (r#"{ dict = { any = [] } }"#, "`any` must not be empty"),
+            (r#"{ dict = { any = 1 } }"#, "`any` must be an array"),
+            (
+                r#"{ dict = { any = [ { key = "A" } ], key = "B" } }"#,
+                "`any` cannot be combined",
+            ),
+            (
+                r#"{ dict = { any = [ { key = "A" } ], all = [ { key = "B" } ] } }"#,
+                "cannot be combined",
+            ),
+            (
+                r#"{ dict = { any = [ { key = "A", int = "x" } ] } }"#,
+                "integer",
+            ),
         ] {
             let e = matcher(m).unwrap_err();
             assert!(e.contains(want), "{m}: {e}");
@@ -856,6 +896,23 @@ match = { dict = { key = "S", name = "Launch" } }
         assert!(
             e.contains("src/rules/filetype/x.rs: no `impl Rule for X` found"),
             "{e}"
+        );
+    }
+
+    #[test]
+    fn generates_any_and_all() {
+        let text = LAUNCH.replace(
+            r#"match = { dict = { key = "S", name = "Launch" } }"#,
+            r#"match = { dict = { any = [ { key = "JS" }, { all = [ { key = "S", int = 1 } ] } ] } }"#,
+        );
+        let rules = parse_file("rules/active_content.toml", &text).unwrap();
+        let src = generate(&rules, &[]);
+        let p = "crate::rules::declarative::DictMatch";
+        assert!(
+            src.contains(&format!(
+                "{p}::Any(&[{p}::Key(\"JS\"), {p}::All(&[{p}::Int {{ key: \"S\", value: 1 }}, ]), ])"
+            )),
+            "{src}"
         );
     }
 
