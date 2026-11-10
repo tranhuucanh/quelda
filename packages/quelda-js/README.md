@@ -6,12 +6,13 @@ valid or invalid, with the rules the file violates. It never renders or previews
 The engine is written in Rust and compiled to WebAssembly. It runs in a Web Worker, so a scan
 does not block the page.
 
-> **Status:** early development, not published yet.
+> **Status:** first release (0.x). The verdict format and rule IDs are stable; defaults may
+> still be tuned. See the [changelog](https://github.com/tranhuucanh/quelda/blob/main/CHANGELOG.md).
 
 > **The browser is not a security boundary.** A check in the browser is a convenience: it
 > gives users fast feedback and saves an upload. Anyone can skip it or send a file straight
 > to your server. **Always scan again on the server** with the same engine version (the
-> `quelda` CLI, coming soon) before a file reaches Ghostscript, ImageMagick or any other PDF
+> [`quelda` CLI](https://github.com/tranhuucanh/quelda/blob/main/docs/cli.md)) before a file reaches Ghostscript, ImageMagick or any other PDF
 > processor.
 
 ## Supported files
@@ -71,7 +72,7 @@ Starts the worker and resolves once the engine is loaded. Rejects with a `Quelda
 | `ENGINE.READ` | engine | the `File` / `Blob` could not be read while scanning (e.g. it changed or was deleted) |
 | `POLICY.INVALID` | package | the policy object cannot be turned into JSON (cycle, `BigInt`, …) |
 
-Verdicts follow [`verdict.schema.json`](../../schemas/verdict.schema.json). The engine has no
+Verdicts follow [`verdict.schema.json`](https://github.com/tranhuucanh/quelda/blob/main/schemas/verdict.schema.json). The engine has no
 clock in WebAssembly, so the package fills `stats.duration_ms` with the time the engine call
 took, measured in the worker with `performance.now()` (whole milliseconds; queueing and file
 reading are not included).
@@ -86,7 +87,7 @@ shrinks; a fresh worker returns it to the system).
 
 Every rule the engine knows (`id`, `category`, `severity`, `default_action`, `locked`,
 `stage`, `since`, `message`, `description`; see
-[`rules.schema.json`](../../schemas/rules.schema.json)), sorted by `id`. Rejects with a
+[`rules.schema.json`](https://github.com/tranhuucanh/quelda/blob/main/schemas/rules.schema.json)), sorted by `id`. Rejects with a
 `QueldaError`. `scanner.engineVersion` is the engine version.
 
 ### `scanner.terminate()`
@@ -97,7 +98,7 @@ twice.
 ## Policy
 
 Three levels; the most specific wins: **preset → categories → rules**
-([`policy.schema.json`](../../schemas/policy.schema.json)).
+([`policy.schema.json`](https://github.com/tranhuucanh/quelda/blob/main/schemas/policy.schema.json)).
 
 ```ts
 await scanner.scan(file, {
@@ -138,7 +139,8 @@ const policy = { ...serverPolicy, rules: Object.fromEntries(
   Object.entries(serverPolicy.rules ?? {}).filter(([id]) => known.has(id))) };
 ```
 
-(The server must keep using the full policy.)
+(The server must keep using the full policy. On the server, `quelda rules` lists the rules of
+the CLI.)
 
 ## Memory and transfer
 
@@ -184,7 +186,7 @@ needs `worker-src 'self'` (or wherever you serve it).
 ## Node
 
 Needs **Node ≥ 20**. Node has no Web Workers, so `createScanner()` does not work there out of
-the box; on a server use the `quelda` CLI (coming soon). The package's own tests run the real
+the box; on a server use the [`quelda` CLI](https://github.com/tranhuucanh/quelda/blob/main/docs/cli.md). The package's own tests run the real
 worker in Node through `worker_threads` (see `test/helpers/node-worker.ts`).
 
 ## Development
@@ -201,3 +203,6 @@ npm run test:examples   # npm pack → install into the Vite and webpack example
 ## License
 
 MIT OR Apache-2.0.
+
+Security issues: please report them privately (see
+[SECURITY.md](https://github.com/tranhuucanh/quelda/blob/main/SECURITY.md)).

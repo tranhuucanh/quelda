@@ -1,9 +1,18 @@
 {
   "name": "quelda",
-  "version": "0.0.0",
+  "version": "0.1.0-rc.1",
   "description": "PDF security scanner (WebAssembly): one PDF + policy in, verdict out",
   "license": "MIT OR Apache-2.0",
-  "private": true,
+  "author": "0xTh3OKrypt <tranhuucanh39@gmail.com>",
+  "homepage": "https://github.com/tranhuucanh/quelda/tree/main/packages/quelda-js#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tranhuucanh/quelda.git",
+    "directory": "packages/quelda-js"
+  },
+  "bugs": {
+    "url": "https://github.com/tranhuucanh/quelda/issues"
+  },
   "type": "module",
   "keywords": [
     "pdf",
@@ -48,5 +57,9 @@
     "typescript": "5.9.3",
     "vite": "7.3.7",
     "vitest": "4.1.12"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   }
 }
