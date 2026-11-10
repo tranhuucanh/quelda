@@ -29,6 +29,14 @@ Test PDFs are generated, not committed. Generate them before running tests that 
 cargo run -p quelda-testkit --bin gen-fixtures   # writes tests/fixtures/ and tests/conformance/
 ```
 
+npm package (`packages/quelda-js`, Node ≥ 20; see its README):
+
+```bash
+scripts/wasm-build.sh                               # WASM engine → target/wasm-pkg
+cargo run -p quelda-wasm --example wasm_golden      # native verdicts the package must match
+cd packages/quelda-js && npm ci && npm test && npm run test:examples
+```
+
 | Path | Contents |
 |---|---|
 | `crates/quelda-core` | Engine: parser, filters, facts, rules, policy, verdict |

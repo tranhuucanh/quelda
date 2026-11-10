@@ -63,3 +63,13 @@ jobs:
         run: cargo run -p quelda-testkit --bin gen-fixtures
       - name: wasm tests + size budget
         run: scripts/wasm-test.sh
+      # npm package (plan Step 12): uses target/wasm-pkg + tests/wasm/golden.json
+      # from wasm-test.sh. Mock-worker + real-engine tests, types, npm pack.
+      - name: npm package tests
+        working-directory: packages/quelda-js
+        run: |
+          npm ci --no-audit --no-fund
+          npm test
+      - name: npm examples (Vite, webpack) from the packed package
+        working-directory: packages/quelda-js
+        run: npm run test:examples

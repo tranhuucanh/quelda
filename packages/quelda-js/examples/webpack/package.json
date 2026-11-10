@@ -1,0 +1,15 @@
+{
+  "name": "quelda-example-webpack",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "preview": "node ../serve.mjs dist"
+  },
+  "dependencies": {
+    "quelda": "file:../.."
+  },
+  "devDependencies": {
+    "webpack": "5.112.2"
+  }
+}

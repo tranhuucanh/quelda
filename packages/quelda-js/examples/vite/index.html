@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>quelda example (Vite)</title>
+    <style>
+      body { font: 14px/1.4 system-ui, sans-serif; margin: 2rem; max-width: 60rem; }
+      pre { background: #f4f4f4; padding: 1rem; overflow: auto; white-space: pre-wrap; }
+      .ok { color: #106b21; } .bad { color: #b00020; }
+    </style>
+  </head>
+  <body>
+    <h1>quelda</h1>
+    <p id="status">starting…</p>
+    <p id="selftest">self-test: running…</p>
+    <p>
+      <label>Preset
+        <select id="preset">
+          <option>strict</option>
+          <option selected>balanced</option>
+          <option>permissive</option>
+        </select>
+      </label>
+      <input id="file" type="file" accept="application/pdf,.pdf" />
+    </p>
+    <pre id="summary" class=""></pre>
+    <pre id="verdict"></pre>
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>
