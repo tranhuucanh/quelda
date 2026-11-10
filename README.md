@@ -38,6 +38,7 @@ cargo run -p quelda-testkit --bin gen-fixtures   # writes tests/fixtures/
 | `packages/quelda-js` | npm package `quelda` |
 | `schemas/` | JSON Schemas for policy and verdict |
 | `fuzz/` | cargo-fuzz targets |
+| `docs/ADDING_A_RULE.md` | Checklist for adding a rule |
 
 ## License
 
