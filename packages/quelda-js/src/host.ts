@@ -4,12 +4,47 @@
 
 import { errorMessage, type FromWorker } from './protocol.js';
 
+/** What `scan_source` reads the file through (see quelda-wasm). */
+export interface Reader {
+  size: number;
+  /** Fills `into` with the bytes at `offset`, synchronously, or throws. */
+  readInto(offset: number, into: Uint8Array): void;
+}
+
 /** The wasm-bindgen exports the host calls. */
 export interface Engine {
   scan(bytes: Uint8Array, policyJson: string): string;
+  scan_source(reader: Reader, policyJson: string): string;
   list_rules(): string;
   version(): string;
+  /** Current WASM memory size in bytes. */
+  memory(): number;
 }
+
+/** A synchronous reader over a Blob, if this scope can read one. */
+export type BlobReader = (blob: Blob) => Reader | undefined;
+
+/**
+ * `FileReaderSync` (dedicated workers in browsers): each `readInto` reads
+ * one slice of the Blob, so the file is never loaded whole. `undefined`
+ * where it does not exist (Node).
+ */
+export const fileReaderSync: BlobReader = (blob) => {
+  const FRS = (globalThis as { FileReaderSync?: new () => { readAsArrayBuffer(b: Blob): ArrayBuffer } })
+    .FileReaderSync;
+  if (typeof FRS !== 'function') return undefined;
+  const frs = new FRS();
+  return {
+    size: blob.size,
+    readInto(offset, into) {
+      const buf = frs.readAsArrayBuffer(blob.slice(offset, offset + into.length));
+      if (buf.byteLength !== into.length) throw new Error('the file changed while it was read');
+      into.set(new Uint8Array(buf));
+    },
+  };
+};
+
+const isBlob = (x: unknown): x is Blob => typeof Blob !== 'undefined' && x instanceof Blob;
 
 /** Loads the engine; `wasm` is the scanner's `wasm` option (or `undefined`). */
 export type EngineLoader = (wasm: string | WebAssembly.Module | undefined) => Promise<Engine>;
@@ -24,6 +59,7 @@ export function createHost(
   load: EngineLoader,
   post: (message: FromWorker) => void,
   now: () => number = () => performance.now(),
+  readerFor: BlobReader = fileReaderSync,
 ): (data: unknown) => Promise<void> {
   let engine: Engine | undefined;
   let initStarted = false;
@@ -69,18 +105,38 @@ export function createHost(
         return;
       }
       case 'scan': {
-        const { id, bytes, policy } = msg;
+        const { id, bytes, blob, policy } = msg;
         if (typeof id !== 'number') return;
-        if (!(bytes instanceof ArrayBuffer) || typeof policy !== 'string') {
+        const ok = bytes instanceof ArrayBuffer ? blob === undefined : bytes === undefined && isBlob(blob);
+        if (!ok || typeof policy !== 'string') {
           post({ type: 'fail', id, message: 'malformed scan request' });
           return;
         }
-        call(id, (e) => {
+        const timed = (scan: (e: Engine) => string) => (e: Engine): FromWorker => {
           const start = now();
-          const verdict = e.scan(new Uint8Array(bytes), policy);
+          const verdict = scan(e);
           const durationMs = now() - start;
-          return { type: 'scan', id, verdict, durationMs };
-        });
+          return { type: 'scan', id, verdict, durationMs, memory: e.memory() };
+        };
+        if (bytes instanceof ArrayBuffer) {
+          call(id, timed((e) => e.scan(new Uint8Array(bytes), policy)));
+          return;
+        }
+        const file = blob as Blob;
+        const reader = readerFor(file);
+        if (reader !== undefined) {
+          call(id, timed((e) => e.scan_source(reader, policy)));
+          return;
+        }
+        // No synchronous reads here: the whole file, then the slice path.
+        let whole: ArrayBuffer;
+        try {
+          whole = await file.arrayBuffer();
+        } catch (e) {
+          post({ type: 'input-error', id, message: `could not read the file: ${errorMessage(e)}` });
+          return;
+        }
+        call(id, timed((e) => e.scan(new Uint8Array(whole), policy)));
         return;
       }
       case 'rules': {

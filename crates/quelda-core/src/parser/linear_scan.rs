@@ -3,6 +3,7 @@
 //! parsing them is up to the caller (and bounded by its work budget).
 
 use super::lexer::is_whitespace;
+use super::parse::Bytes;
 
 /// Start offsets (of `N`) of every `<digits> <ws> <digits> <ws> obj` where
 /// `obj` is not followed by a regular character, in file order. Generous on
@@ -14,18 +15,18 @@ pub fn object_candidates(src: &[u8]) -> Vec<usize> {
 }
 
 /// Walks back from `obj` at `kw` over `ws digits ws digits`.
-pub(crate) fn header_start_before(src: &[u8], kw: usize) -> Option<usize> {
+pub(crate) fn header_start_before<B: Bytes + ?Sized>(src: &B, kw: usize) -> Option<usize> {
     let mut i = kw;
     for _ in 0..2 {
         let ws_end = i;
-        while i > 0 && is_whitespace(src[i - 1]) {
+        while i > 0 && src.byte(i - 1).is_some_and(is_whitespace) {
             i -= 1;
         }
         if i == ws_end {
             return None;
         }
         let digits_end = i;
-        while i > 0 && src[i - 1].is_ascii_digit() {
+        while i > 0 && src.byte(i - 1).is_some_and(|b| b.is_ascii_digit()) {
             i -= 1;
         }
         if i == digits_end {

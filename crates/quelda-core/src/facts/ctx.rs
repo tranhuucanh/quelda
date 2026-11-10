@@ -18,9 +18,10 @@ use super::page_tree::{PageTree, page_tree};
 use super::streams::{StreamRoles, classify, filter_names, resolved_chain};
 use super::visitor::{Location, visit_dicts};
 use crate::error::{EngineIssue, IssueCode};
-use crate::filters::{DecodeOutcome, FilterKind, decode};
+use crate::filters::{DecodeOutcome, FilterKind, decode, decode_owned};
 use crate::limits::{Budget, Limits, Thresholds};
 use crate::parser::document::{Facts, ObjectEntry, Revision, Trailer};
+use crate::parser::input::Input;
 use crate::parser::raw_scan::Signature;
 use crate::parser::structure::Structure;
 use crate::parser::{Dict, Document, Name, PdfObject, PdfStream};
@@ -29,6 +30,41 @@ use crate::parser::{Dict, Document, Name, PdfObject, PdfStream};
 /// kept (decoded again when used): peak memory stays about one stream above
 /// this, whatever the total decoded (plan Step 16).
 pub const KEEP_DECODED: usize = 32 << 20;
+
+/// Bytes `check_file` rules may read after the byte order mark and
+/// whitespace a file starts with (they look at most 4 KiB in).
+pub const HEAD_TAIL: usize = 8 << 10;
+
+/// Leading bytes `check_file` rules skip: a UTF-8 BOM, then ASCII
+/// whitespace and NUL.
+fn lead(b: &[u8]) -> usize {
+    let bom = if b.starts_with(b"\xEF\xBB\xBF") { 3 } else { 0 };
+    bom + b[bom..]
+        .iter()
+        .take_while(|b| matches!(b, b' ' | b'\t' | b'\r' | b'\n' | b'\x0C' | b'\0'))
+        .count()
+}
+
+/// The whole slice, or from a source: the leading BOM/whitespace plus
+/// [`HEAD_TAIL`] bytes.
+fn file_head<'a>(input: &Input<'a>) -> Cow<'a, [u8]> {
+    if let Some(src) = input.as_slice() {
+        return Cow::Borrowed(src);
+    }
+    let mut want = 64 << 10;
+    loop {
+        let n = want.min(input.len());
+        let Some(b) = input.read(0..n) else {
+            return Cow::Borrowed(&[]);
+        };
+        let lead = lead(&b);
+        if lead + HEAD_TAIL <= n || n == input.len() {
+            let end = (lead + HEAD_TAIL).min(n);
+            return Cow::Owned(b[..end].to_vec());
+        }
+        want = want.saturating_mul(2);
+    }
+}
 
 #[cfg(test)]
 thread_local! {
@@ -95,7 +131,9 @@ pub trait Visitor {
 }
 
 pub struct Ctx<'a> {
-    src: &'a [u8],
+    input: Input<'a>,
+    /// The start of the file `check_file` rules see ([`Ctx::file_head`]).
+    head: Cow<'a, [u8]>,
     limits: Limits,
     thresholds: Thresholds,
     doc: Document,
@@ -118,8 +156,13 @@ pub struct Ctx<'a> {
 
 impl<'a> Ctx<'a> {
     pub fn new(src: &'a [u8], limits: Limits, thresholds: Thresholds) -> Ctx<'a> {
+        Ctx::from_input(Input::slice(src), limits, thresholds)
+    }
+
+    pub(crate) fn from_input(input: Input<'a>, limits: Limits, thresholds: Thresholds) -> Ctx<'a> {
         let mut budget = Budget::new(&limits);
-        let doc = Document::parse(src, &limits, &mut budget);
+        let doc = Document::parse_input(&input, &limits, &mut budget);
+        let head = file_head(&input);
         let limits_hit = doc
             .issues
             .iter()
@@ -131,7 +174,8 @@ impl<'a> Ctx<'a> {
         let images = images(&doc);
         let headers = headers_outside_streams(&doc);
         let ctx = Ctx {
-            src,
+            input,
+            head,
             limits,
             thresholds,
             doc,
@@ -155,9 +199,11 @@ impl<'a> Ctx<'a> {
         ctx
     }
 
-    /// The input bytes.
-    pub fn raw(&self) -> &'a [u8] {
-        self.src
+    /// The start of the file: at least the byte order mark and whitespace
+    /// it starts with, plus [`HEAD_TAIL`] bytes (the whole file when it is
+    /// in memory). What `check_file` rules may read.
+    pub fn file_head(&self) -> &[u8] {
+        &self.head
     }
 
     pub fn document(&self) -> &Document {
@@ -330,9 +376,10 @@ impl<'a> Ctx<'a> {
     fn run_decode(&self, stream: &PdfStream, budget: &mut Budget) -> DecodeOutcome<'a> {
         match resolved_chain(&self.doc, &stream.dict) {
             Err(msg) => DecodeOutcome::Invalid(msg),
-            Ok((filter, parms)) => match self.src.get(stream.data.clone()) {
+            Ok((filter, parms)) => match self.input.read(stream.data.clone()) {
                 None => DecodeOutcome::Invalid("stream data out of range"),
-                Some(raw) => decode(raw, filter.as_ref(), parms.as_ref(), budget),
+                Some(Cow::Borrowed(raw)) => decode(raw, filter.as_ref(), parms.as_ref(), budget),
+                Some(Cow::Owned(raw)) => decode_owned(raw, filter.as_ref(), parms.as_ref(), budget),
             },
         }
     }
@@ -372,6 +419,13 @@ impl<'a> Ctx<'a> {
     pub fn issues(&self) -> Vec<EngineIssue> {
         let mut v = self.doc.issues.clone();
         v.extend(self.issues.borrow().iter().cloned());
+        if let Some((offset, msg)) = self.input.failure() {
+            v.push(EngineIssue::new(
+                IssueCode::EngineRead,
+                Some(offset),
+                format!("input could not be read: {msg}"),
+            ));
+        }
         v
     }
 

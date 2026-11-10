@@ -1,20 +1,22 @@
 // Worker side (host.ts) with a fake engine.
 
 import { describe, expect, it, vi } from 'vitest';
-import { createHost, type Engine } from '../src/host.js';
+import { createHost, fileReaderSync, type BlobReader, type Engine, type Reader } from '../src/host.js';
 import type { FromWorker } from '../src/protocol.js';
 
-function setup(engine: Partial<Engine> = {}, load?: () => Promise<Engine>) {
+function setup(engine: Partial<Engine> = {}, load?: () => Promise<Engine>, readerFor: BlobReader = () => undefined) {
   const posted: FromWorker[] = [];
   const full: Engine = {
     scan: vi.fn(() => '{"verdict":true}'),
+    scan_source: vi.fn(() => '{"source":true}'),
     list_rules: vi.fn(() => '[]'),
     version: vi.fn(() => '1.2.3'),
+    memory: vi.fn(() => 1 << 20),
     ...engine,
   };
   const loader = vi.fn(load ?? (async () => full));
   let t = 0;
-  const host = createHost(loader, (m) => posted.push(m), () => (t += 5));
+  const host = createHost(loader, (m) => posted.push(m), () => (t += 5), readerFor);
   return { host, posted, engine: full, loader };
 }
 
@@ -67,7 +69,79 @@ describe('host', () => {
     await host({ type: 'init' });
     await host({ type: 'scan', id: 7, bytes: bytes(), policy: '{"preset":"strict"}' });
     expect(engine.scan).toHaveBeenCalledWith(new Uint8Array([37, 80, 68, 70]), '{"preset":"strict"}');
-    expect(posted[1]).toEqual({ type: 'scan', id: 7, verdict: '{"verdict":true}', durationMs: 5 });
+    expect(posted[1]).toEqual({ type: 'scan', id: 7, verdict: '{"verdict":true}', durationMs: 5, memory: 1 << 20 });
+  });
+
+  it('scans a Blob through a synchronous reader, on demand', async () => {
+    const reads: [number, number][] = [];
+    const readerFor: BlobReader = (blob) => ({
+      size: blob.size,
+      readInto: (offset, into) => {
+        reads.push([offset, into.length]);
+        into.fill(1);
+      },
+    });
+    let seen: Reader | undefined;
+    const { host, posted, engine } = setup(
+      {
+        scan_source: vi.fn((r: Reader) => {
+          seen = r;
+          const buf = new Uint8Array(2);
+          r.readInto(3, buf);
+          return '{"source":true}';
+        }),
+      },
+      undefined,
+      readerFor,
+    );
+    await host({ type: 'init' });
+    await host({ type: 'scan', id: 4, blob: new Blob([new Uint8Array(10)]), policy: '{}' });
+    expect(engine.scan).not.toHaveBeenCalled();
+    expect(seen?.size).toBe(10);
+    expect(reads).toEqual([[3, 2]]);
+    expect(posted[1]).toEqual({ type: 'scan', id: 4, verdict: '{"source":true}', durationMs: 5, memory: 1 << 20 });
+  });
+
+  it('without a synchronous reader, reads the Blob whole', async () => {
+    const { host, posted, engine } = setup();
+    await host({ type: 'init' });
+    await host({ type: 'scan', id: 5, blob: new Blob([new Uint8Array([37, 80])]), policy: '{}' });
+    expect(engine.scan).toHaveBeenCalledWith(new Uint8Array([37, 80]), '{}');
+    expect(engine.scan_source).not.toHaveBeenCalled();
+    expect(posted[1]).toMatchObject({ type: 'scan', id: 5 });
+    const bad = new Blob([new Uint8Array(1)]);
+    bad.arrayBuffer = () => Promise.reject(new DOMException('file changed', 'NotReadableError'));
+    await host({ type: 'scan', id: 6, blob: bad, policy: '{}' });
+    expect(posted[2]).toEqual({ type: 'input-error', id: 6, message: 'could not read the file: file changed' });
+    // A read failure is not an engine failure: the next scan runs.
+    await host({ type: 'scan', id: 7, bytes: bytes(), policy: '{}' });
+    expect(posted[3]).toMatchObject({ type: 'scan', id: 7 });
+  });
+
+  it('FileReaderSync reads one slice per call and checks its length', () => {
+    expect(fileReaderSync(new Blob([]))).toBeUndefined(); // Node has none
+    const calls: [number, number][] = [];
+    class FakeFRS {
+      readAsArrayBuffer(b: Blob): ArrayBuffer {
+        const size = b.size;
+        calls.push([size, 0]);
+        return new Uint8Array(size).fill(7).buffer;
+      }
+    }
+    const g = globalThis as { FileReaderSync?: unknown };
+    g.FileReaderSync = FakeFRS;
+    try {
+      const r = fileReaderSync(new Blob([new Uint8Array(100)]))!;
+      expect(r.size).toBe(100);
+      const into = new Uint8Array(30);
+      r.readInto(60, into);
+      expect(into.every((b) => b === 7)).toBe(true);
+      expect(calls).toEqual([[30, 0]]);
+      // Past the end: the slice comes up short → throws (ENGINE.READ).
+      expect(() => r.readInto(90, new Uint8Array(30))).toThrow('the file changed');
+    } finally {
+      delete g.FileReaderSync;
+    }
   });
 
   it('lists rules', async () => {
@@ -107,9 +181,13 @@ describe('host', () => {
     await host({ type: 'init' });
     await host({ type: 'scan', id: 1, bytes: [1, 2], policy: '{}' });
     await host({ type: 'scan', id: 2, bytes: bytes(), policy: {} });
+    await host({ type: 'scan', id: 3, blob: 'x', policy: '{}' });
+    await host({ type: 'scan', id: 4, bytes: bytes(), blob: new Blob([]), policy: '{}' });
     expect(posted.slice(1)).toEqual([
       { type: 'fail', id: 1, message: 'malformed scan request' },
       { type: 'fail', id: 2, message: 'malformed scan request' },
+      { type: 'fail', id: 3, message: 'malformed scan request' },
+      { type: 'fail', id: 4, message: 'malformed scan request' },
     ]);
     expect(engine.scan).not.toHaveBeenCalled();
   });

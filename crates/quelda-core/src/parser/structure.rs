@@ -4,6 +4,7 @@
 //! offsets written in the file.
 
 use super::lexer::{is_regular, is_whitespace};
+use super::parse::Bytes;
 
 /// The first `%PDF-` in the file.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -67,43 +68,51 @@ pub(crate) fn find_all<'a>(hay: &'a [u8], needle: &'a [u8]) -> impl Iterator<Ite
 }
 
 /// Start of file or right after CR/LF, with optional spaces/tabs before.
-pub(crate) fn at_line_start(src: &[u8], i: usize) -> bool {
+pub(crate) fn at_line_start<B: Bytes + ?Sized>(src: &B, i: usize) -> bool {
     let mut j = i;
-    while j > 0 && matches!(src[j - 1], b' ' | b'\t' | 0) {
+    while j > 0 && matches!(src.byte(j - 1), Some(b' ' | b'\t' | 0)) {
         j -= 1;
     }
-    j == 0 || matches!(src[j - 1], b'\n' | b'\r')
+    j == 0 || matches!(src.byte(j - 1), Some(b'\n' | b'\r'))
 }
 
 /// `kw` at `i` is a whole token (not part of a longer regular run).
-pub(crate) fn keyword_at(src: &[u8], i: usize, kw: &[u8]) -> bool {
-    let before = i.checked_sub(1).and_then(|j| src.get(j)).copied();
-    let after = src.get(i + kw.len()).copied();
-    src[i..].starts_with(kw) && !before.is_some_and(is_regular) && !after.is_some_and(is_regular)
+pub(crate) fn keyword_at<B: Bytes + ?Sized>(src: &B, i: usize, kw: &[u8]) -> bool {
+    let before = i.checked_sub(1).and_then(|j| src.byte(j));
+    let after = src.byte(i + kw.len());
+    src.starts_with_at(i, kw) && !before.is_some_and(is_regular) && !after.is_some_and(is_regular)
 }
 
 /// Non-negative integer after whitespace/comments at `pos` (bounded look-ahead).
-pub(crate) fn int_after(src: &[u8], pos: usize) -> Option<usize> {
+pub(crate) fn int_after<B: Bytes + ?Sized>(src: &B, pos: usize) -> Option<usize> {
     let mut i = pos;
     let limit = pos.saturating_add(64).min(src.len());
-    while i < limit && (is_whitespace(src[i]) || src[i] == b'%') {
-        if src[i] == b'%' {
-            while i < limit && !matches!(src[i], b'\n' | b'\r') {
+    let at = |i: usize| src.byte(i).unwrap_or(0);
+    while i < limit && (is_whitespace(at(i)) || at(i) == b'%') {
+        if at(i) == b'%' {
+            while i < limit && !matches!(at(i), b'\n' | b'\r') {
                 i += 1;
             }
         } else {
             i += 1;
         }
     }
-    let digits = src
-        .get(i..)?
-        .iter()
-        .take_while(|b| b.is_ascii_digit())
-        .count();
-    if digits == 0 || digits > 19 || src.get(i + digits).copied().is_some_and(is_regular) {
+    // More than 19 digits is never an offset: 20 are enough to know.
+    let mut digits = [0u8; 20];
+    let mut n = 0;
+    while n < digits.len() {
+        match src.byte(i + n) {
+            Some(b) if b.is_ascii_digit() => {
+                digits[n] = b;
+                n += 1;
+            }
+            _ => break,
+        }
+    }
+    if n == 0 || n > 19 || src.byte(i + n).is_some_and(is_regular) {
         return None;
     }
-    std::str::from_utf8(&src[i..i + digits]).ok()?.parse().ok()
+    std::str::from_utf8(&digits[..n]).ok()?.parse().ok()
 }
 
 #[cfg(test)]

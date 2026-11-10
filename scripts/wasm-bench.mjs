@@ -5,14 +5,18 @@
 // Writes one JSON line per file (scripts/bench-lib.mjs `record`) to --out
 // (default target/bench/wasm-node.jsonl) and prints a Markdown table.
 //
-//   node scripts/wasm-bench.mjs [--pkg DIR] [--policy JSON] [--runs N] [--out FILE] PATH...
+//   node scripts/wasm-bench.mjs [--source] [--pkg DIR] [--policy JSON] [--runs N] [--out FILE] PATH...
+//
+// --source: `scan_source` reads the file on demand (`fs.readSync` into WASM
+// memory, as the npm worker does with `FileReaderSync`); engine
+// `wasm-node-source`. Default: the whole file is read, then copied in.
 //
 // Measures: wall time of `scan` (performance.now; includes the copy of the
 // input into WASM memory, as in production), user+sys CPU
 // (process.cpuUsage), peak RSS (process.resourceUsage().maxRSS) and the final
 // WASM memory size (it only grows, so final = peak).
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { closeSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { argv, exit } from 'node:process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -21,11 +25,11 @@ import { DEFAULT_POLICY, listFiles, record, table } from './bench-lib.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const usage = () => {
-  console.error('usage: node scripts/wasm-bench.mjs [--pkg DIR] [--policy JSON] [--runs N] [--out FILE] PATH...');
+  console.error('usage: node scripts/wasm-bench.mjs [--source] [--pkg DIR] [--policy JSON] [--runs N] [--out FILE] PATH...');
   exit(2);
 };
 
-const opts = { pkg: join(root, 'target/wasm-pkg'), policy: DEFAULT_POLICY, runs: 3, out: join(root, 'target/bench/wasm-node.jsonl'), one: null, paths: [] };
+const opts = { pkg: join(root, 'target/wasm-pkg'), policy: DEFAULT_POLICY, runs: 3, out: join(root, 'target/bench/wasm-node.jsonl'), one: null, source: false, paths: [] };
 const args = argv.slice(2);
 while (args.length) {
   const a = args.shift();
@@ -35,6 +39,7 @@ while (args.length) {
   else if (a === '--runs') opts.runs = Number(val()) || usage();
   else if (a === '--out') opts.out = resolve(val());
   else if (a === '--one') opts.one = val();
+  else if (a === '--source') opts.source = true;
   else if (!a.startsWith('-')) opts.paths.push(a);
   else usage();
 }
@@ -42,25 +47,50 @@ while (args.length) {
 if (opts.one) {
   const mod = await import(pathToFileURL(join(opts.pkg, 'quelda.js')).href);
   const wasm = mod.initSync({ module: readFileSync(join(opts.pkg, 'quelda_bg.wasm')) });
-  const input = readFileSync(opts.one);
   const ms = [];
   let verdict = '';
+  let bytes = 0;
   const cpu0 = process.cpuUsage();
-  for (let i = 0; i < Math.max(1, opts.runs); i++) {
-    const t0 = performance.now();
-    verdict = mod.scan(input, opts.policy);
-    ms.push(performance.now() - t0);
+  if (opts.source) {
+    const fd = openSync(opts.one, 'r');
+    bytes = fstatSync(fd).size;
+    const reader = {
+      size: bytes,
+      readInto(offset, into) {
+        let done = 0;
+        while (done < into.length) {
+          const n = readSync(fd, into, done, into.length - done, offset + done);
+          if (n === 0) throw new Error('short read');
+          done += n;
+        }
+      },
+    };
+    for (let i = 0; i < Math.max(1, opts.runs); i++) {
+      const t0 = performance.now();
+      verdict = mod.scan_source(reader, opts.policy);
+      ms.push(performance.now() - t0);
+    }
+    closeSync(fd);
+  } else {
+    const input = readFileSync(opts.one);
+    bytes = input.length;
+    for (let i = 0; i < Math.max(1, opts.runs); i++) {
+      const t0 = performance.now();
+      verdict = mod.scan(input, opts.policy);
+      ms.push(performance.now() - t0);
+    }
   }
   const cpu = process.cpuUsage(cpu0);
   const rec = record({
     file: opts.one,
-    bytes: input.length,
+    bytes,
     ms,
     cpuMs: (cpu.user + cpu.system) / 1000 / ms.length,
     rssPeak: process.resourceUsage().maxRSS * 1024,
     wasmMem: wasm.memory.buffer.byteLength,
     verdict,
   });
+  if (opts.source) rec.engine = 'wasm-node-source';
   console.log(JSON.stringify(rec));
   exit(0);
 }
@@ -72,7 +102,7 @@ for (const { path, name } of listFiles(opts.paths)) {
   const r = spawnSync(
     process.execPath,
     // 4 GiB of WASM memory needs a large enough old space for the JS copy too.
-    ['--max-old-space-size=8192', self, '--one', path, '--pkg', opts.pkg, '--policy', opts.policy, '--runs', String(opts.runs)],
+    ['--max-old-space-size=8192', self, '--one', path, '--pkg', opts.pkg, '--policy', opts.policy, '--runs', String(opts.runs), ...(opts.source ? ['--source'] : [])],
     { encoding: 'utf8', maxBuffer: 1 << 20 },
   );
   let rec = null;

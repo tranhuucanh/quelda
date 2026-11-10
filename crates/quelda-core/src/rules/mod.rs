@@ -26,7 +26,10 @@ pub use meta::{Action, Category, RuleInfo, RuleMeta, Severity, Stage};
 pub trait Rule: Sync {
     fn meta(&self) -> &'static RuleMeta;
 
-    /// L0: the raw input bytes (header, magic, polyglots).
+    /// L0: the start of the raw input (header, magic): at least its leading
+    /// BOM/whitespace plus [`crate::facts::ctx::HEAD_TAIL`] bytes, the whole
+    /// file when it is in memory (see [`Ctx::file_head`]). Facts about the
+    /// rest of the file come from `Ctx` (e.g. `Ctx::signatures`).
     fn check_file(&self, _raw: &[u8], _out: &mut Findings) {}
 
     /// Every dictionary in the union set: top-level, nested, stream
@@ -279,7 +282,7 @@ pub fn run_into(ctx: &Ctx, rules: &[&dyn Rule], out: Findings) -> Findings {
         if d.out.stopped() {
             return d.out;
         }
-        r.check_file(ctx.raw(), &mut d.out);
+        r.check_file(ctx.file_head(), &mut d.out);
     }
     ctx.walk(&mut d);
     for r in with(|h| h.document) {

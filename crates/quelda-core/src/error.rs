@@ -32,6 +32,9 @@ pub enum IssueCode {
     LimitParseWork,
     /// The input is larger than `max_file_bytes` (not parsed at all).
     LimitFileBytes,
+    /// The input could not be read (a [`crate::source::Source`] failed or
+    /// came up short). Nothing after it was inspected.
+    EngineRead,
     /// The policy is not valid JSON, has an unknown field or a value of the
     /// wrong type, or names an unknown rule. Nothing is scanned.
     PolicyInvalid,
@@ -52,6 +55,7 @@ impl IssueCode {
             IssueCode::LimitRevisions => "LIMIT.REVISIONS",
             IssueCode::LimitParseWork => "LIMIT.PARSE_WORK",
             IssueCode::LimitFileBytes => "LIMIT.FILE_BYTES",
+            IssueCode::EngineRead => "ENGINE.READ",
             IssueCode::PolicyInvalid => "POLICY.INVALID",
         }
     }

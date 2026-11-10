@@ -3,7 +3,7 @@
 // terminate. Every verdict the wrapper makes itself must fit the schema.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createScannerWith, DEFAULT_TIMEOUT_MS, QueldaError, type Scanner } from '../src/scanner.js';
+import { createScannerWith, DEFAULT_TIMEOUT_MS, QueldaError, RECYCLE_MEMORY_BYTES, type Scanner } from '../src/scanner.js';
 import type { ToWorker } from '../src/protocol.js';
 import type { Verdict } from '../src/types.js';
 import { defaultReply, factory, MockWorker, RULES, VERSION, verdictJson, type Reply } from './helpers/mock-worker.js';
@@ -154,7 +154,7 @@ describe('input', () => {
   });
   afterEach(() => s.terminate());
 
-  const sent = (): Uint8Array => new Uint8Array(w.scans().at(-1)!.bytes);
+  const sent = (): Uint8Array => new Uint8Array(w.scans().at(-1)!.bytes!);
 
   it('copies an ArrayBuffer; the caller keeps it', async () => {
     const buf = PDF.slice().buffer;
@@ -187,11 +187,16 @@ describe('input', () => {
     expect(sent()).toEqual(new Uint8Array(words.buffer));
   });
 
-  it('reads a Blob and a File', async () => {
-    expectPass(await s.scan(new Blob([PDF])));
-    expect(sent()).toEqual(PDF);
-    expectPass(await s.scan(new File([PDF], 'a.pdf', { type: 'application/pdf' })));
-    expect(sent()).toEqual(PDF);
+  it('passes a Blob or File to the worker unread (the worker reads what it needs)', async () => {
+    for (const input of [new Blob([PDF]), new File([PDF], 'a.pdf', { type: 'application/pdf' })]) {
+      const read = vi.spyOn(input, 'arrayBuffer');
+      expectPass(await s.scan(input));
+      expect(read).not.toHaveBeenCalled();
+      const msg = w.scans().at(-1)!;
+      expect(msg.bytes).toBeUndefined();
+      expect(new Uint8Array(await msg.blob!.arrayBuffer())).toEqual(PDF);
+      expect(w.posted.at(-1)!.transfer).toHaveLength(0);
+    }
   });
 
   it('copies SharedArrayBuffer data', async () => {
@@ -244,13 +249,20 @@ describe('input', () => {
     expect(w.scans()).toHaveLength(0);
   });
 
-  it('gives ENGINE.INPUT when the file cannot be read', async () => {
-    const blob = new Blob([PDF]);
-    blob.arrayBuffer = () => Promise.reject(new DOMException('file changed', 'NotReadableError'));
-    const v = await s.scan(blob);
+  it('gives ENGINE.INPUT when the worker cannot read the file; the worker is kept', async () => {
+    const { s, workers } = await scanner((msg, w) => {
+      if (msg.type === 'scan' && msg.blob !== undefined) {
+        w.reply({ type: 'input-error', id: msg.id, message: 'could not read the file: file changed' });
+      } else defaultReply(msg, w);
+    });
+    const v = await s.scan(new Blob([PDF]));
     expectError(v, 'ENGINE.INPUT');
     expect(v.errors[0]!.message).toContain('file changed');
     expect(v.stats.bytes).toBe(PDF.length);
+    expectPass(await s.scan(PDF));
+    expect(workers).toHaveLength(1);
+    expect(workers[0]!.terminated).toBe(0);
+    s.terminate();
   });
 
   it.each([
@@ -717,15 +729,43 @@ describe('terminate', () => {
     expect(workers).toHaveLength(1);
   });
 
-  it('works while a scan is still reading its file', async () => {
+  it('works while a scan of a file is queued', async () => {
     const { s, workers } = await scanner();
-    let release!: (b: ArrayBuffer) => void;
-    const blob = new Blob([PDF]);
-    blob.arrayBuffer = () => new Promise((r) => (release = r));
-    const p = s.scan(blob);
+    const p = s.scan(new Blob([PDF]));
     s.terminate();
-    release(PDF.slice().buffer);
     expectError(await p, 'ENGINE.ABORTED');
     expect(workers[0]!.scans()).toHaveLength(0);
+  });
+});
+
+describe('worker recycling', () => {
+  const withMemory =
+    (memory: number): Reply =>
+    (msg, w) => {
+      if (msg.type === 'scan') w.reply({ type: 'scan', id: msg.id, verdict: verdictJson(), durationMs: 1, memory });
+      else defaultReply(msg, w);
+    };
+
+  it('replaces a worker whose WASM memory grew past the threshold', async () => {
+    const { s, workers } = await scanner(withMemory(RECYCLE_MEMORY_BYTES + 1), withMemory(1 << 20));
+    expectPass(await s.scan(PDF));
+    expect(workers[0]!.terminated).toBe(1);
+    expectPass(await s.scan(PDF)); // a fresh worker
+    expect(workers).toHaveLength(2);
+    expect(workers[1]!.scans()).toHaveLength(1);
+    expectPass(await s.scan(PDF)); // small memory: kept
+    expect(workers).toHaveLength(2);
+    expect(workers[1]!.terminated).toBe(0);
+    s.terminate();
+  });
+
+  it('a queued request runs on the new worker', async () => {
+    const { s, workers } = await scanner(withMemory(RECYCLE_MEMORY_BYTES * 2), withMemory(0));
+    const [a, rules, b] = await Promise.all([s.scan(PDF), s.listRules(), s.scan(new Blob([PDF]))]);
+    expectPass(a);
+    expect(rules).toEqual(RULES);
+    expectPass(b);
+    expect(workers).toHaveLength(2);
+    s.terminate();
   });
 });
