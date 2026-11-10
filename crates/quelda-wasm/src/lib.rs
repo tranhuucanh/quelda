@@ -41,11 +41,23 @@ mod tests {
         assert_eq!(version(), env!("CARGO_PKG_VERSION"));
     }
 
+    /// Parses a verdict and drops `stats.duration_ms` (wall time differs between runs).
+    fn without_duration(verdict: &str) -> serde_json::Value {
+        let mut v: serde_json::Value = serde_json::from_str(verdict).unwrap();
+        if let Some(stats) = v.get_mut("stats").and_then(|s| s.as_object_mut()) {
+            stats.remove("duration_ms");
+        }
+        v
+    }
+
     #[test]
     fn scan_forwards_to_scan_json() {
         let pdf = b"%PDF-1.7\n1 0 obj\n<< /Type /Catalog >>\nendobj\n%%EOF\n";
         for policy in ["{}", r#"{"preset":"strict"}"#, "not json", "[]"] {
-            assert_eq!(scan(pdf, policy), quelda_core::scan_json(pdf, policy));
+            assert_eq!(
+                without_duration(&scan(pdf, policy)),
+                without_duration(&quelda_core::scan_json(pdf, policy))
+            );
         }
         let v: serde_json::Value = serde_json::from_str(&scan(pdf, "not json")).unwrap();
         assert_eq!(v["status"], "ERROR");
