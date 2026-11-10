@@ -133,8 +133,9 @@ impl Stage {
     }
 }
 
-/// Everything about a rule except how it detects (design §5.2).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// Everything about a rule except how it detects (design §5.2). Serializes
+/// as one entry of [`crate::list_rules_json`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub struct RuleMeta {
     /// `CATEGORY.NAME`, stable forever, never reused.
     pub id: &'static str,
