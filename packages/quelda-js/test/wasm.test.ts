@@ -5,6 +5,7 @@
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createScanner, type Policy, type Scanner, type ScanInput, type Verdict } from '../dist/index.js';
 import { nodeWorkers } from './helpers/node-worker.js';
@@ -197,5 +198,60 @@ describe('real worker lifecycle', () => {
     await new Promise((r) => setTimeout(r, 50));
     s.terminate();
     expect((await p).errors.map((e) => e.code)).toEqual(['ENGINE.ABORTED']);
+  });
+});
+
+describe('engine scan_source (file read on demand, plan Step 16 Phase B)', () => {
+  type Glue = {
+    initSync(o: { module: WebAssembly.Module }): { memory: WebAssembly.Memory };
+    scan_source(reader: { size: number; readInto(offset: number, into: Uint8Array): void }, policy: string): string;
+  };
+  let glue: Glue;
+  beforeAll(async () => {
+    glue = (await import(pathToFileURL(join(DIST, 'wasm/quelda.js')).href)) as Glue;
+    glue.initSync({ module });
+  });
+
+  const readerOf = (bytes: Uint8Array, reads: number[] = []) => ({
+    size: bytes.length,
+    readInto(offset: number, into: Uint8Array) {
+      reads.push(into.length);
+      into.set(bytes.subarray(offset, offset + into.length));
+    },
+  });
+
+  it('matches the native lib on every golden case', () => {
+    const mismatches: string[] = [];
+    for (const c of g.cases) {
+      const v = glue.scan_source(readerOf(bytesOf(c.file)), c.policy);
+      if (JSON.stringify(comparable(v)) !== JSON.stringify(comparable(c.verdict))) {
+        mismatches.push(`${c.file} under ${c.policy}:\n  source: ${v}\n  native: ${c.verdict}`);
+      }
+    }
+    expect(mismatches.slice(0, 5)).toEqual([]);
+  });
+
+  it('a reader that throws or a bad size → ERROR (ENGINE.READ / limit), never an exception', () => {
+    const pdf = bytesOf('benign/minimal.pdf');
+    const throwing = { size: pdf.length, readInto: () => { throw new Error('NotReadableError'); } };
+    const v = JSON.parse(glue.scan_source(throwing, '{}'));
+    expect(v.status).toBe('ERROR');
+    expect(v.errors.map((e: { code: string }) => e.code)).toContain('ENGINE.READ');
+    expect(v.errors[0].message).toContain('NotReadableError');
+    for (const size of [-1, 1.5, Number.NaN, '12', undefined]) {
+      const bad = JSON.parse(glue.scan_source({ size: size as number, readInto: () => undefined }, '{}'));
+      expect(bad.status, String(size)).toBe('ERROR');
+      expect(bad.errors.map((e: { code: string }) => e.code)).toEqual(['ENGINE.READ']);
+      expect(bad.stats.bytes).toBe(0);
+    }
+  });
+
+  it('reads at most a block at a time, never the whole file at once', () => {
+    const big = new Uint8Array(5 << 20);
+    const pdf = bytesOf('benign/minimal.pdf');
+    big.set(pdf);
+    const reads: number[] = [];
+    glue.scan_source(readerOf(big, reads), '{}');
+    expect(Math.max(...reads)).toBeLessThanOrEqual((1 << 20) + 64);
   });
 });

@@ -4,7 +4,9 @@
 //! → rules (`rules`) → policy (`policy`) → [`Verdict`].
 //!
 //! Public API (design §8.1): [`scan`], [`scan_json`] (the contract every
-//! binding wraps; schemas in `schemas/`), [`list_rules`].
+//! binding wraps; schemas in `schemas/`), [`list_rules`]; [`scan_source`],
+//! [`scan_source_json`] read the input on demand ([`Source`]) instead of
+//! holding it all in memory, with the same verdict.
 
 #![forbid(unsafe_code)]
 // Input must never be able to crash the engine (design: fail-closed, no panics).
@@ -17,12 +19,18 @@ pub mod limits;
 pub mod parser;
 pub mod policy;
 pub mod rules;
+pub mod source;
 pub mod verdict;
+
+#[cfg(test)]
+mod differential;
 
 use error::IssueCode;
 use facts::Ctx;
+use parser::input::{Input, Tuning};
 pub use policy::Policy;
 use rules::{Action, Findings, Rule};
+pub use source::{ReadError, Source};
 pub use verdict::Verdict;
 use verdict::{PolicyInfo, Stats};
 
@@ -50,7 +58,12 @@ pub fn list_rules_json() -> String {
 /// Scans one file under `policy`. Never panics; anything the engine cannot
 /// inspect makes the verdict `ERROR` (`valid: false`).
 pub fn scan(input: &[u8], policy: &Policy) -> Verdict {
-    scan_with(input, policy, rules::registry::all())
+    scan_with(
+        Ok(Input::slice(input)),
+        input.len() as u64,
+        policy,
+        rules::registry::all(),
+    )
 }
 
 /// [`scan`] with the policy as JSON, verdict as JSON. A policy that does not
@@ -58,19 +71,61 @@ pub fn scan(input: &[u8], policy: &Policy) -> Verdict {
 pub fn scan_json(input: &[u8], policy_json: &str) -> String {
     match Policy::from_json(policy_json) {
         Ok(policy) => scan(input, &policy),
-        Err(e) => Verdict::error(
-            &verdict::issue(IssueCode::PolicyInvalid, e.0),
-            PolicyInfo::unknown(),
-            input.len() as u64,
-        ),
+        Err(e) => invalid_policy(e, input.len() as u64),
     }
     .to_json()
 }
 
-/// [`scan`] over a given rule set (tests inject probe rules).
-fn scan_with(input: &[u8], policy: &Policy, all: &[&'static dyn Rule]) -> Verdict {
+/// [`scan`] reading `source` on demand: one pass in blocks, then only the
+/// regions to parse or decode (opaque stream data is never read again).
+/// Memory does not grow with the file, except for data that must be
+/// decoded. Same verdict as [`scan`] on the same bytes; a read error makes
+/// it `ERROR` (`ENGINE.READ`).
+pub fn scan_source(source: &dyn Source, policy: &Policy) -> Verdict {
+    scan_source_tuned(source, policy, Tuning::DEFAULT)
+}
+
+/// [`scan_source`] with the policy as JSON, verdict as JSON.
+pub fn scan_source_json(source: &dyn Source, policy_json: &str) -> String {
+    match Policy::from_json(policy_json) {
+        Ok(policy) => scan_source(source, &policy),
+        Err(e) => invalid_policy(e, source.len()),
+    }
+    .to_json()
+}
+
+/// The verdict for a source that cannot be read at all (bindings: e.g. a
+/// JS reader without a valid `size`): `ERROR` with `ENGINE.READ`.
+pub fn read_error_json(message: &str, policy_json: &str) -> String {
+    match Policy::from_json(policy_json) {
+        Ok(policy) => scan_with(Err(message.to_string()), 0, &policy, rules::registry::all()),
+        Err(e) => invalid_policy(e, 0),
+    }
+    .to_json()
+}
+
+fn scan_source_tuned(source: &dyn Source, policy: &Policy, tuning: Tuning) -> Verdict {
+    let input = Input::source(source, tuning);
+    scan_with(input, source.len(), policy, rules::registry::all())
+}
+
+fn invalid_policy(e: policy::PolicyError, bytes: u64) -> Verdict {
+    Verdict::error(
+        &verdict::issue(IssueCode::PolicyInvalid, e.0),
+        PolicyInfo::unknown(),
+        bytes,
+    )
+}
+
+/// [`scan`] over a given rule set (tests inject probe rules). `input` is
+/// `Err` when the source cannot be addressed here.
+fn scan_with(
+    input: Result<Input<'_>, String>,
+    bytes: u64,
+    policy: &Policy,
+    all: &[&'static dyn Rule],
+) -> Verdict {
     let clock = Clock::start();
-    let bytes = input.len() as u64;
     if let Err(e) = policy.validate(all) {
         let issue = verdict::issue(IssueCode::PolicyInvalid, e.0);
         return Verdict::error(&issue, PolicyInfo::of(policy), bytes);
@@ -87,7 +142,14 @@ fn scan_with(input: &[u8], policy: &Policy, all: &[&'static dyn Rule]) -> Verdic
         return Verdict::error(&issue, PolicyInfo::of(policy), bytes);
     }
 
-    let ctx = Ctx::new(input, limits, policy.thresholds());
+    let input = match input {
+        Ok(i) => i,
+        Err(msg) => {
+            let issue = verdict::issue(IssueCode::EngineRead, msg);
+            return Verdict::error(&issue, PolicyInfo::of(policy), bytes);
+        }
+    };
+    let ctx = Ctx::from_input(input, limits, policy.thresholds());
     let resolved = policy::resolve_all(all, policy);
     // Rules resolved to `off` do not run (design §6.5).
     let active: Vec<&dyn Rule> = resolved
@@ -217,7 +279,8 @@ mod tests {
         let (a, b) = (probe(&A), probe(&B));
         let rules: [&'static dyn Rule; 2] = [a, b];
         let v = scan_with(
-            MINIMAL,
+            Ok(Input::slice(MINIMAL)),
+            MINIMAL.len() as u64,
             &policy(r#"{"rules": {"ACTIVE.QUELDA_A": "off"}}"#),
             &rules,
         );
@@ -230,7 +293,8 @@ mod tests {
         let a = probe(&A);
         let rules: [&'static dyn Rule; 1] = [a];
         let v = scan_with(
-            MINIMAL,
+            Ok(Input::slice(MINIMAL)),
+            MINIMAL.len() as u64,
             &policy(r#"{"categories": {"active_content": "off"}}"#),
             &rules,
         );
@@ -242,14 +306,24 @@ mod tests {
     fn stop_on_first_stops_after_first_block() {
         let (w, a, b) = (probe(&W), probe(&A), probe(&B));
         let rules: [&'static dyn Rule; 3] = [w, a, b];
-        let full = scan_with(MINIMAL, &Policy::default(), &rules);
+        let full = scan_with(
+            Ok(Input::slice(MINIMAL)),
+            MINIMAL.len() as u64,
+            &Policy::default(),
+            &rules,
+        );
         assert_eq!(full.violations.len(), 2);
         assert_eq!(full.violations[0].count, 2);
         assert_eq!(full.warnings.len(), 1);
 
         let (w, a, b) = (probe(&W), probe(&A), probe(&B));
         let rules: [&'static dyn Rule; 3] = [w, a, b];
-        let v = scan_with(MINIMAL, &policy(r#"{"stop_on_first": true}"#), &rules);
+        let v = scan_with(
+            Ok(Input::slice(MINIMAL)),
+            MINIMAL.len() as u64,
+            &policy(r#"{"stop_on_first": true}"#),
+            &rules,
+        );
         assert_eq!(v.status, Status::Reject);
         assert!(v.policy.stop_on_first);
         let ids: Vec<_> = v.violations.iter().map(|v| v.rule_id).collect();
@@ -261,7 +335,12 @@ mod tests {
         // A warning alone does not stop the scan.
         let w = probe(&W);
         let rules: [&'static dyn Rule; 1] = [w];
-        let v = scan_with(MINIMAL, &policy(r#"{"stop_on_first": true}"#), &rules);
+        let v = scan_with(
+            Ok(Input::slice(MINIMAL)),
+            MINIMAL.len() as u64,
+            &policy(r#"{"stop_on_first": true}"#),
+            &rules,
+        );
         assert_eq!(v.warnings[0].count, 2);
         assert_eq!(v.status, Status::Pass);
     }

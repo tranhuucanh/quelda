@@ -1,9 +1,11 @@
-//! `quelda-bench [--policy JSON] [--runs N] [--out FILE] PATH...`: native
+//! `quelda-bench [--source] [--policy JSON] [--runs N] [--out FILE] PATH...`: native
 //! benchmark (plan Step 16 Phase 0). Each file (directories are walked) is
 //! scanned `--runs` times (default 3) in a child process of its own, so the
 //! peak RSS is that file's. Writes one JSON line per file to `--out`
 //! (default `target/bench/native.jsonl`, see `quelda_eval::bench`) and prints
-//! a Markdown table.
+//! a Markdown table. `--source` scans through `quelda_core::scan_source`
+//! (the file read on demand, `engine` = `native-source`) instead of reading
+//! it whole first.
 //!
 //! Peak heap comes from a counting global allocator; peak RSS and CPU time
 //! from `getrusage`.
@@ -88,24 +90,36 @@ fn rusage() -> (f64, u64) {
 }
 
 /// Child: scan one file `runs` times, print the measure as one JSON line.
-fn one(path: &Path, policy: &str, runs: usize) -> ExitCode {
-    let input = match std::fs::read(path) {
-        Ok(b) => b,
+fn one(path: &Path, policy: &str, runs: usize, source: bool) -> ExitCode {
+    let input = if source {
+        quelda_core::source::FileSource::open(path).map(Input::File)
+    } else {
+        std::fs::read(path).map(Input::Bytes)
+    };
+    let input = match input {
+        Ok(i) => i,
         Err(e) => {
             eprintln!("error: {}: {e}", path.display());
             return ExitCode::from(1);
         }
     };
+    // Heap is the engine's: the input buffer (slice mode) is not counted.
     let base = LIVE.load(Ordering::Relaxed);
     PEAK.store(base, Ordering::Relaxed);
     let (cpu0, _) = rusage();
     let mut m = Measure {
-        bytes: input.len() as u64,
+        bytes: match &input {
+            Input::Bytes(b) => b.len() as u64,
+            Input::File(f) => quelda_core::Source::len(f),
+        },
         ..Measure::default()
     };
     for _ in 0..runs.max(1) {
         let start = Instant::now();
-        let verdict = quelda_core::scan_json(&input, policy);
+        let verdict = match &input {
+            Input::Bytes(b) => quelda_core::scan_json(b, policy),
+            Input::File(f) => quelda_core::scan_source_json(f, policy),
+        };
         m.ms.push(start.elapsed().as_secs_f64() * 1000.0);
         m.verdict = verdict;
     }
@@ -113,8 +127,14 @@ fn one(path: &Path, policy: &str, runs: usize) -> ExitCode {
     m.cpu_ms = (cpu1 - cpu0) / m.ms.len() as f64;
     m.rss_peak = rss;
     m.heap_peak = PEAK.load(Ordering::Relaxed).saturating_sub(base) as u64;
-    println!("{}", m.record("native", &path.to_string_lossy()));
+    let engine = if source { "native-source" } else { "native" };
+    println!("{}", m.record(engine, &path.to_string_lossy()));
     ExitCode::SUCCESS
+}
+
+enum Input {
+    Bytes(Vec<u8>),
+    File(quelda_core::source::FileSource),
 }
 
 /// Every file to bench with its display name (relative to a directory argument).
@@ -146,6 +166,7 @@ fn main() -> ExitCode {
     let mut runs = 3usize;
     let mut out = PathBuf::from("target/bench/native.jsonl");
     let mut child = None;
+    let mut source = false;
     let mut paths = Vec::new();
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -162,6 +183,7 @@ fn main() -> ExitCode {
                 Some(v) => out = PathBuf::from(v),
                 None => return usage(),
             },
+            "--source" => source = true,
             "--one" => match args.next() {
                 Some(v) => child = Some(PathBuf::from(v)),
                 None => return usage(),
@@ -171,7 +193,7 @@ fn main() -> ExitCode {
         }
     }
     if let Some(path) = child {
-        return one(&path, &policy, runs);
+        return one(&path, &policy, runs, source);
     }
     if paths.is_empty() {
         return usage();
@@ -197,6 +219,7 @@ fn main() -> ExitCode {
             .arg("--one")
             .arg(path)
             .args(["--policy", &policy, "--runs", &runs.to_string()])
+            .args(source.then_some("--source"))
             .output();
         let rec = res
             .ok()
@@ -229,6 +252,6 @@ fn main() -> ExitCode {
 }
 
 fn usage() -> ExitCode {
-    eprintln!("usage: quelda-bench [--policy JSON] [--runs N] [--out FILE] PATH...");
+    eprintln!("usage: quelda-bench [--source] [--policy JSON] [--runs N] [--out FILE] PATH...");
     ExitCode::from(2)
 }

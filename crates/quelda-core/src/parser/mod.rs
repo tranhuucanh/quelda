@@ -2,6 +2,7 @@
 //! about rules or policy.
 
 pub mod document;
+pub(crate) mod input;
 pub mod lexer;
 pub mod linear_scan;
 pub mod object;

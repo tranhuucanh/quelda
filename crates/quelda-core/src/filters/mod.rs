@@ -213,6 +213,24 @@ pub fn decode_stream<'a>(
 /// Unfiltered data is returned as is and charged nothing: decode limits
 /// stop decompression bombs, and raw data is already bounded by the file
 /// size limit.
+/// [`decode`] of data the caller owns (read from a [`crate::Source`]):
+/// unfiltered data is moved into the outcome, not copied.
+pub fn decode_owned(
+    raw: Vec<u8>,
+    filter: Option<&PdfObject>,
+    parms: Option<&PdfObject>,
+    budget: &mut Budget,
+) -> DecodeOutcome<'static> {
+    let outcome = decode(&raw, filter, parms, budget);
+    let whole =
+        matches!(&outcome, DecodeOutcome::Complete(Cow::Borrowed(b)) if b.len() == raw.len());
+    if whole {
+        drop(outcome);
+        return DecodeOutcome::Complete(Cow::Owned(raw));
+    }
+    outcome.into_owned()
+}
+
 pub fn decode<'a>(
     raw: &'a [u8],
     filter: Option<&PdfObject>,
@@ -771,5 +789,26 @@ mod tests {
         assert!(s.push(b'c').is_ok());
         assert!(s.push(b'd').is_err());
         assert_eq!(s.into_inner(), b"abc");
+    }
+
+    #[test]
+    fn decode_owned_moves_unfiltered_data() {
+        let limits = Limits::default();
+        let raw = b"hello".to_vec();
+        let ptr = raw.as_ptr();
+        match decode_owned(raw, None, None, &mut Budget::new(&limits)) {
+            DecodeOutcome::Complete(Cow::Owned(v)) => {
+                assert_eq!(v, b"hello");
+                assert_eq!(v.as_ptr(), ptr, "moved, not copied");
+            }
+            o => panic!("{o:?}"),
+        }
+        // Filtered: same outcome as `decode`.
+        let hex = name("ASCIIHexDecode");
+        let raw = b"4142>".to_vec();
+        let want = decode(&raw, Some(&hex), None, &mut Budget::new(&limits)).into_owned();
+        let got = decode_owned(raw, Some(&hex), None, &mut Budget::new(&limits));
+        assert_eq!(got.data(), want.data());
+        assert_eq!(got.data(), Some(&b"AB"[..]));
     }
 }

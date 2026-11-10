@@ -11,17 +11,15 @@
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 
+use super::input::Input;
 use super::object::{Dict, ObjRef, PdfObject, PdfStream, StreamLength};
 use super::objstm::parse_members;
-use super::parse::{
-    ParseError, object_header_at, parse_indirect_object_extent, parse_object_extent,
-    stream_data_with_length,
-};
+use super::parse::ParseError;
 use super::raw_scan::{RawScan, Signature};
 use super::structure::Structure;
-use super::xref::{EntryKind, XrefKind, XrefProblem, XrefSection, parse_stream_rows, parse_table};
+use super::xref::{EntryKind, XrefKind, XrefProblem, XrefSection, parse_stream_rows};
 use crate::error::{EngineIssue, IssueCode};
-use crate::filters::{DecodeOutcome, FilterKind, decode};
+use crate::filters::{DecodeOutcome, FilterKind, decode, decode_owned};
 use crate::limits::{Budget, Limits};
 
 /// Parsing may examine at most `WORK_FACTOR` × (file size + decoded object
@@ -183,19 +181,26 @@ pub struct Document {
     pub facts: Facts,
     /// Problems that make the verdict `ERROR`.
     pub issues: Vec<EngineIssue>,
-    by_id: HashMap<ObjRef, Vec<usize>>,
+    by_id: ById,
 }
 
 impl Document {
     /// Builds the union object set. Never fails: damage becomes facts, and
     /// whatever could not be inspected becomes an issue.
     pub fn parse(src: &[u8], limits: &Limits, budget: &mut Budget) -> Document {
-        let raw = RawScan::scan(src);
+        Document::parse_input(&Input::slice(src), limits, budget)
+    }
+
+    /// [`Document::parse`] over any input. A read error stops nothing here:
+    /// the input records it and the verdict is `ERROR` (`ENGINE.READ`).
+    pub(crate) fn parse_input(input: &Input<'_>, limits: &Limits, budget: &mut Budget) -> Document {
+        let mut raw = RawScan::scan_input(input);
+        input.set_endstreams(std::mem::take(&mut raw.endstreams));
         let mut b = Builder {
-            src,
+            src: input,
             limits,
             budget,
-            work: Work::new(src.len()),
+            work: Work::new(input.len()),
             doc: Document {
                 structure: raw.structure,
                 signatures: raw.signatures,
@@ -205,10 +210,9 @@ impl Document {
                 objects: Vec::new(),
                 facts: Facts::default(),
                 issues: Vec::new(),
-                by_id: HashMap::new(),
+                by_id: ById::default(),
             },
-            by_offset: HashMap::new(),
-            attempted: HashSet::new(),
+            offsets: HashMap::new(),
             section_at: HashMap::new(),
             full: false,
             issued: HashSet::new(),
@@ -230,16 +234,12 @@ impl Document {
 
     /// Every definition of `id`.
     pub fn definitions(&self, id: ObjRef) -> impl Iterator<Item = &ObjectEntry> + '_ {
-        self.by_id
-            .get(&id)
-            .into_iter()
-            .flatten()
-            .filter_map(|&i| self.objects.get(i))
+        self.by_id.get(id).filter_map(|i| self.objects.get(i))
     }
 
     /// Indices into [`Document::objects`] of every definition of `id`.
     pub fn definition_indices(&self, id: ObjRef) -> impl Iterator<Item = usize> + '_ {
-        self.by_id.get(&id).into_iter().flatten().copied()
+        self.by_id.get(id)
     }
 
     /// The trailer dictionary of revision `r`.
@@ -247,6 +247,65 @@ impl Document {
         let s = self.revisions.get(r)?.section;
         self.sections.get(s)?.trailer.as_ref()
     }
+}
+
+const NONE: u32 = u32::MAX;
+
+/// Definitions by id, in [`Document::objects`] order: a chain per id
+/// through `next` (one u32 per object, no allocation per id).
+#[derive(Clone, Debug, Default, PartialEq)]
+struct ById {
+    /// First and last definition of each id.
+    ends: HashMap<ObjRef, (u32, u32)>,
+    /// Per object: the next definition of the same id, or `NONE`.
+    next: Vec<u32>,
+}
+
+impl ById {
+    /// Object `i` (the next index) defines `id`.
+    fn push(&mut self, id: ObjRef, i: u32) {
+        self.next.push(NONE);
+        match self.ends.entry(id) {
+            std::collections::hash_map::Entry::Occupied(mut e) => {
+                let last = e.get().1;
+                if let Some(n) = self.next.get_mut(last as usize) {
+                    *n = i;
+                }
+                e.get_mut().1 = i;
+            }
+            std::collections::hash_map::Entry::Vacant(e) => {
+                e.insert((i, i));
+            }
+        }
+    }
+
+    fn get(&self, id: ObjRef) -> impl Iterator<Item = usize> + '_ {
+        let mut cur = self.ends.get(&id).map_or(NONE, |e| e.0);
+        std::iter::from_fn(move || {
+            if cur == NONE {
+                return None;
+            }
+            let i = cur;
+            cur = self.next.get(i as usize).copied().unwrap_or(NONE);
+            Some(i as usize)
+        })
+    }
+}
+
+/// What the builder knows about a file offset.
+#[derive(Clone, Copy)]
+struct Slot {
+    /// The top-level definition whose `N` is here, or `NONE`.
+    object: u32,
+    /// Given to the object parser already (each offset is parsed once).
+    attempted: bool,
+}
+
+impl Slot {
+    const EMPTY: Slot = Slot {
+        object: NONE,
+        attempted: false,
+    };
 }
 
 /// Bytes examined by parsing, against a cap that grows with decoded data.
@@ -275,15 +334,14 @@ impl Work {
 }
 
 struct Builder<'a, 'b> {
-    src: &'a [u8],
+    src: &'b Input<'a>,
     limits: &'a Limits,
     budget: &'b mut Budget,
     work: Work,
     doc: Document,
     /// Top-level definitions by offset of `N`.
-    by_offset: HashMap<usize, usize>,
+    offsets: HashMap<usize, Slot>,
     /// Offsets already given to the object parser (each is parsed once).
-    attempted: HashSet<usize>,
     /// Requested section offset → section index (`None`: no section there).
     section_at: HashMap<usize, Option<usize>>,
     /// `max_objects` reached.
@@ -330,26 +388,43 @@ impl<'a> Builder<'a, '_> {
             return None;
         }
         let i = self.doc.objects.len();
+        // Indices are u32 (`NONE` excluded): far more objects than memory holds.
+        let Some(i32) = u32::try_from(i).ok().filter(|&i| i != NONE) else {
+            self.full = true;
+            self.limit(IssueCode::LimitObjects, "too many objects");
+            return None;
+        };
         if let Location::File { offset } = entry.location {
-            self.by_offset.insert(offset, i);
+            self.offsets.entry(offset).or_insert(Slot::EMPTY).object = i32;
         }
-        self.doc.by_id.entry(entry.id).or_default().push(i);
+        self.doc.by_id.push(entry.id, i32);
         self.doc.objects.push(entry);
         Some(i)
     }
 
+    /// The top-level definition whose `N` is at `offset`.
+    fn object_at(&self, offset: usize) -> Option<usize> {
+        let s = self.offsets.get(&offset)?;
+        (s.object != NONE).then_some(s.object as usize)
+    }
+
     /// Parses the top-level object at `offset`; records failures.
     fn parse_top_level(&mut self, offset: usize, linear: bool) -> Option<usize> {
-        if self.full || self.out_of_work() || !self.attempted.insert(offset) {
-            return self.by_offset.get(&offset).copied();
+        if self.full || self.out_of_work() {
+            return self.object_at(offset);
         }
-        let (result, furthest) = parse_indirect_object_extent(self.src, offset, self.limits);
+        let slot = self.offsets.entry(offset).or_insert(Slot::EMPTY);
+        if slot.attempted {
+            return self.object_at(offset);
+        }
+        slot.attempted = true;
+        let (result, furthest) = self.src.parse_indirect(offset, self.limits);
         if !self.charge(furthest.saturating_sub(offset)) {
             return None;
         }
         match result {
             Ok(o) => {
-                if let Some(&i) = self.by_offset.get(&o.offset) {
+                if let Some(i) = self.object_at(o.offset) {
                     return Some(i);
                 }
                 self.push(ObjectEntry {
@@ -365,7 +440,7 @@ impl<'a> Builder<'a, '_> {
             Err(e) => {
                 if e.issue_code().is_limit() {
                     self.doc.issues.push(e.into());
-                } else if let Some((start, id)) = object_header_at(self.src, offset) {
+                } else if let Some((start, id)) = self.src.object_header_at(offset) {
                     self.doc.facts.broken_objects.push(BrokenObject {
                         offset: start,
                         id,
@@ -404,7 +479,7 @@ impl<'a> Builder<'a, '_> {
                 .doc
                 .definitions(r)
                 .filter_map(|d| u64::try_from(d.object.as_int()?).ok())
-                .filter_map(|len| stream_data_with_length(src, s.data_start, len))
+                .filter_map(|len| src.data_with_length(s.data_start, len))
                 .map(|(range, _)| range)
                 .collect();
             ranges.sort_by_key(|r| r.end);
@@ -509,16 +584,16 @@ impl<'a> Builder<'a, '_> {
         if offset >= self.src.len() || self.out_of_work() {
             return None;
         }
-        let (table, furthest) = parse_table(self.src, offset, self.limits);
+        let (table, furthest) = self.src.parse_table(offset, self.limits);
         if !self.charge(furthest.saturating_sub(offset)) {
             return None;
         }
         let section = match table {
             Some(t) => t,
             None => {
-                let (start, _) = object_header_at(self.src, offset)?;
-                let i = match self.by_offset.get(&start) {
-                    Some(&i) => i,
+                let (start, _) = self.src.object_header_at(offset)?;
+                let i = match self.object_at(start) {
+                    Some(i) => i,
                     None => self.parse_top_level(start, false)?,
                 };
                 self.stream_section(i)?
@@ -602,7 +677,7 @@ impl<'a> Builder<'a, '_> {
 
     /// Decodes a stream, resolving an indirect `/Filter` / `/DecodeParms`.
     fn decode_stream(&mut self, s: &PdfStream) -> DecodeOutcome<'a> {
-        let Some(raw) = self.src.get(s.data.clone()) else {
+        let Some(raw) = self.src.read(s.data.clone()) else {
             return DecodeOutcome::Invalid("stream data out of range");
         };
         let resolve = |o: Option<&PdfObject>| -> Option<PdfObject> {
@@ -613,7 +688,10 @@ impl<'a> Builder<'a, '_> {
         };
         let filter = resolve(s.dict.get("Filter"));
         let parms = resolve(s.dict.get("DecodeParms"));
-        decode(raw, filter.as_ref(), parms.as_ref(), self.budget)
+        match raw {
+            Cow::Borrowed(raw) => decode(raw, filter.as_ref(), parms.as_ref(), self.budget),
+            Cow::Owned(raw) => decode_owned(raw, filter.as_ref(), parms.as_ref(), self.budget),
+        }
     }
 
     /// Top-level objects only an xref offset finds (e.g. a comment between
@@ -635,8 +713,8 @@ impl<'a> Builder<'a, '_> {
             if self.full || self.out_of_work() {
                 break;
             }
-            if let Some((start, _)) = object_header_at(self.src, off) {
-                if !self.by_offset.contains_key(&start) {
+            if let Some((start, _)) = self.src.object_header_at(off) {
+                if self.object_at(start).is_none() {
                     self.parse_top_level(start, false);
                 }
             }
@@ -719,10 +797,7 @@ impl<'a> Builder<'a, '_> {
                 queue.extend(
                     self.doc
                         .by_id
-                        .get(&r)
-                        .into_iter()
-                        .flatten()
-                        .copied()
+                        .get(r)
                         .filter(|&i| matches!(self.doc.objects[i].object, PdfObject::Stream(_))),
                 );
             }
@@ -846,7 +921,7 @@ impl<'a> Builder<'a, '_> {
                 continue;
             }
             let after = off + b"trailer".len();
-            let (result, furthest) = parse_object_extent(self.src, after, self.limits);
+            let (result, furthest) = self.src.parse_object(after, self.limits);
             if !self.charge(furthest.saturating_sub(after)) {
                 break;
             }
@@ -865,7 +940,9 @@ impl<'a> Builder<'a, '_> {
     /// Which definitions each xref entry points at, and which it misses;
     /// definitions no xref lists.
     fn xref_facts(&mut self) {
-        let mut members: HashMap<(u32, u32), Vec<usize>> = HashMap::new();
+        // (container number, index) → member, sorted (one entry per member,
+        // object order kept within a key: what a map of Vecs would give).
+        let mut members: Vec<((u32, u32), usize)> = Vec::new();
         let mut containers: HashSet<u32> = HashSet::new();
         for (i, e) in self.doc.objects.iter().enumerate() {
             if let Location::ObjStm {
@@ -874,9 +951,17 @@ impl<'a> Builder<'a, '_> {
             {
                 let num = self.doc.objects[container].id.num;
                 containers.insert(num);
-                members.entry((num, index)).or_default().push(i);
+                members.push(((num, index), i));
             }
         }
+        members.sort_unstable();
+        let members_of = |k: (u32, u32)| {
+            let from = members.partition_point(|&(m, _)| m < k);
+            members[from..]
+                .iter()
+                .take_while(move |&&(m, _)| m == k)
+                .map(|&(_, i)| i)
+        };
         let mut listed: HashSet<u32> = HashSet::new();
         let mut hits: Vec<(usize, usize)> = Vec::new();
         let mut mismatches = Vec::new();
@@ -897,12 +982,12 @@ impl<'a> Builder<'a, '_> {
                             mismatches.push(miss(MismatchKind::OutOfRange));
                             continue;
                         };
-                        match object_header_at(self.src, off) {
+                        match self.src.object_header_at(off) {
                             None => mismatches.push(miss(MismatchKind::NoObject)),
                             Some((start, id)) => {
                                 if id.num != e.num || u64::from(id.generation) != generation {
                                     mismatches.push(miss(MismatchKind::WrongId(id)));
-                                } else if let Some(&i) = self.by_offset.get(&start) {
+                                } else if let Some(i) = self.object_at(start) {
                                     hits.push((i, si));
                                 }
                             }
@@ -912,10 +997,8 @@ impl<'a> Builder<'a, '_> {
                         listed.insert(e.num);
                         let key = u32::try_from(objstm).ok().zip(u32::try_from(index).ok());
                         let found: Vec<usize> = key
-                            .and_then(|k| members.get(&k))
                             .into_iter()
-                            .flatten()
-                            .copied()
+                            .flat_map(members_of)
                             .filter(|&i| self.doc.objects[i].id.num == e.num)
                             .collect();
                         if found.is_empty() {
@@ -952,9 +1035,10 @@ impl<'a> Builder<'a, '_> {
         let mut groups: Vec<(ObjRef, Vec<usize>)> = self
             .doc
             .by_id
+            .ends
             .iter()
-            .filter(|(_, v)| v.len() > 1)
-            .map(|(id, v)| (*id, v.clone()))
+            .filter(|(_, (first, last))| first != last)
+            .map(|(&id, _)| (id, self.doc.by_id.get(id).collect()))
             .collect();
         groups.sort_unstable();
         let objects = &self.doc.objects;
@@ -1014,10 +1098,10 @@ fn is_objstm(dict: &Dict) -> bool {
 
 /// Same content: equal objects; for streams, equal dictionaries and equal
 /// raw data (not equal positions).
-fn same_content(src: &[u8], a: &PdfObject, b: &PdfObject) -> bool {
+fn same_content(src: &Input<'_>, a: &PdfObject, b: &PdfObject) -> bool {
     match (a, b) {
         (PdfObject::Stream(x), PdfObject::Stream(y)) => {
-            x.dict == y.dict && src.get(x.data.clone()) == src.get(y.data.clone())
+            x.dict == y.dict && src.same_bytes(x.data.clone(), y.data.clone())
         }
         _ => a == b,
     }
@@ -1071,6 +1155,7 @@ mod tests {
                 length: StreamLength::Declared,
             }))
         };
+        let src = &Input::slice(src);
         assert!(same_content(src, &stream(0..3), &stream(4..7)));
         assert!(!same_content(src, &stream(0..3), &stream(3..6)));
         assert!(same_content(src, &PdfObject::Int(1), &PdfObject::Int(1)));

@@ -68,6 +68,7 @@ Starts the worker and resolves once the engine is loaded. Rejects with a `Quelda
 | `ENGINE.ABORTED` | package | the `signal` fired, or `terminate()` was called |
 | `ENGINE.WORKER` | package | the worker or the engine crashed, failed to load, or replied with something malformed |
 | `ENGINE.INPUT` | package | the input is not a supported type, the file could not be read, or an option is invalid |
+| `ENGINE.READ` | engine | the `File` / `Blob` could not be read while scanning (e.g. it changed or was deleted) |
 | `POLICY.INVALID` | package | the policy object cannot be turned into JSON (cycle, `BigInt`, …) |
 
 Verdicts follow [`verdict.schema.json`](../../schemas/verdict.schema.json). The engine has no
@@ -78,7 +79,8 @@ reading are not included).
 Scans run **one at a time**, in call order (WebAssembly is single-threaded). The timeout of
 a scan starts when the scan starts, not when it is queued. A timeout, an abort of a running
 scan, or a crash kills the worker; the next scan starts a fresh one. A worker whose engine
-threw is never reused.
+threw is never reused, nor one whose WebAssembly memory grew past 64 MiB (it never
+shrinks; a fresh worker returns it to the system).
 
 ### `scanner.listRules(options?)`
 
@@ -140,12 +142,16 @@ const policy = { ...serverPolicy, rules: Object.fromEntries(
 
 ## Memory and transfer
 
-The whole file is copied into the engine's memory (limit: `limits.max_file_bytes`, default
-256 MiB).
+Prefer passing the `File` / `Blob` itself (limit: `limits.max_file_bytes`, default 256 MiB).
 
-- `File` / `Blob`: read when `scan` is called; your object is untouched.
-- `ArrayBuffer` / typed array: **copied when `scan` is called**; changing your buffer
-  afterwards does not affect the scan.
+- `File` / `Blob` (recommended): **never loaded whole.** The worker reads it in place with
+  `FileReaderSync`: one pass in 1 MiB blocks, then only the parts the engine must parse or
+  decode (image, font and other opaque data are not read again). The engine's memory stays
+  a few MiB whatever the file size, plus the data it must decompress. Your object is
+  untouched; the file must not change until the scan resolves (if it does: `ENGINE.READ`).
+  Where `FileReaderSync` does not exist (Node), the worker reads the file whole instead.
+- `ArrayBuffer` / typed array: **copied when `scan` is called**, then copied whole into
+  the engine's memory; changing your buffer afterwards does not affect the scan.
 - `transfer: true`: hands your `ArrayBuffer` (or the buffer of a typed array that spans it
   whole) to the worker without a copy. **Your buffer is detached (length 0) as soon as `scan`
   is called.** A view of part of a buffer is still copied.

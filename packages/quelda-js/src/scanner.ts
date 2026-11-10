@@ -101,7 +101,7 @@ interface Job {
   done: boolean;
   timeoutMs: number | null;
   /** Owned bytes + policy JSON (scan only); rejects with a Failure. */
-  payload?: Promise<{ bytes: ArrayBuffer; policy: string }>;
+  payload?: Promise<{ bytes: ArrayBuffer | Blob; policy: string }>;
   /** Input size for synthesized verdicts. */
   bytes: number;
   started: number;
@@ -119,6 +119,15 @@ interface Slot {
   onDead(reason: Error): void;
   detach(): void;
 }
+
+/**
+ * A worker whose WASM memory grew past this after a scan is replaced
+ * (memory is returned to the system). Scans of a `File` / `Blob` stay far
+ * below; a large `ArrayBuffer` is copied into WASM memory whole.
+ */
+export const RECYCLE_MEMORY_BYTES = 64 * 1024 * 1024;
+
+const byteSize = (b: ArrayBuffer | Blob): number => (b instanceof ArrayBuffer ? b.byteLength : b.size);
 
 const now = (): number => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
@@ -160,11 +169,12 @@ export function resolveTimeout(value: unknown, fallback: number | null): number 
 }
 
 /**
- * Turns the input into an `ArrayBuffer` the scanner owns (safe to transfer).
- * Copies unless `transfer` is set and the buffer can be handed over whole.
- * Throws / rejects with a Failure.
+ * Turns the input into an `ArrayBuffer` the scanner owns (safe to transfer)
+ * — copied unless `transfer` is set and the buffer can be handed over whole —
+ * or a `Blob` / `File` as is: the worker reads only the parts the engine
+ * needs (plan Step 16 Phase B). Throws / rejects with a Failure.
  */
-export async function normalizeInput(input: unknown, transfer: boolean): Promise<ArrayBuffer> {
+export async function normalizeInput(input: unknown, transfer: boolean): Promise<ArrayBuffer | Blob> {
   const t = tag(input);
   if (t === '[object ArrayBuffer]') {
     const buf = input as ArrayBuffer;
@@ -191,16 +201,7 @@ export async function normalizeInput(input: unknown, transfer: boolean): Promise
     (typeof Blob !== 'undefined' && input instanceof Blob) ||
     ((t === '[object Blob]' || t === '[object File]') &&
       typeof (input as { arrayBuffer?: unknown }).arrayBuffer === 'function');
-  if (isBlob) {
-    let buf: unknown;
-    try {
-      buf = await (input as Blob).arrayBuffer();
-    } catch (e) {
-      throw failure('ENGINE.INPUT', `could not read the file: ${errorMessage(e)}`);
-    }
-    if (tag(buf) !== '[object ArrayBuffer]') throw failure('ENGINE.INPUT', 'could not read the file');
-    return buf as ArrayBuffer;
-  }
+  if (isBlob) return input as Blob;
   throw failure('ENGINE.INPUT', `unsupported input (${t}): expected File, Blob, ArrayBuffer or Uint8Array`);
 }
 
@@ -496,7 +497,7 @@ class ScannerImpl implements Scanner {
     try {
       const payload = job.payload === undefined ? undefined : await job.payload;
       if (job.done) return;
-      if (payload !== undefined) job.bytes = payload.bytes.byteLength;
+      if (payload !== undefined) job.bytes = byteSize(payload.bytes);
       job.phase = 'starting';
       const slot = this.slot ?? this.spawn();
       await slot.ready;
@@ -505,7 +506,12 @@ class ScannerImpl implements Scanner {
       job.phase = 'running';
       job.slot = slot;
       if (job.kind === 'scan' && payload !== undefined) {
-        slot.worker.postMessage({ type: 'scan', id: job.id, bytes: payload.bytes, policy: payload.policy }, [payload.bytes]);
+        const { bytes, policy } = payload;
+        if (bytes instanceof ArrayBuffer) {
+          slot.worker.postMessage({ type: 'scan', id: job.id, bytes, policy }, [bytes]);
+        } else {
+          slot.worker.postMessage({ type: 'scan', id: job.id, blob: bytes, policy }, []);
+        }
       } else {
         slot.worker.postMessage({ type: 'rules', id: job.id }, []);
       }
@@ -613,7 +619,18 @@ class ScannerImpl implements Scanner {
         throw failure('ENGINE.WORKER', typeof msg.message === 'string' ? msg.message : 'the engine failed');
       }
       if (job.kind === 'scan' && msg.type === 'scan') {
-        this.finish(job, { ok: true, verdict: parseVerdict(msg.verdict, msg.durationMs) });
+        const verdict = parseVerdict(msg.verdict, msg.durationMs);
+        // WASM memory never shrinks: hand it back to the system by starting
+        // the next request in a fresh worker.
+        if (typeof msg.memory === 'number' && msg.memory > RECYCLE_MEMORY_BYTES) {
+          this.killWorker(new Error('worker recycled'));
+        }
+        this.finish(job, { ok: true, verdict });
+        return;
+      }
+      if (job.kind === 'scan' && msg.type === 'input-error') {
+        const message = typeof msg.message === 'string' ? msg.message : 'could not read the file';
+        this.finish(job, { ok: false, failure: failure('ENGINE.INPUT', message) });
         return;
       }
       if (job.kind === 'rules' && msg.type === 'rules') {

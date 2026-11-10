@@ -6,15 +6,28 @@ export type WasmSource = string | URL | WebAssembly.Module;
 
 export type ToWorker =
   | { type: 'init'; wasm?: string | WebAssembly.Module }
-  /** `bytes` is transferred (detached on the sending side). */
-  | { type: 'scan'; id: number; bytes: ArrayBuffer; policy: string }
+  /**
+   * `bytes` is transferred (detached on the sending side). A `blob` is
+   * passed as is (no copy) and read by the worker, on demand when it can
+   * (`FileReaderSync`), whole otherwise.
+   */
+  | ({ type: 'scan'; id: number; policy: string } & (
+      | { bytes: ArrayBuffer; blob?: undefined }
+      | { blob: Blob; bytes?: undefined }
+    ))
   | { type: 'rules'; id: number };
 
 export type FromWorker =
   | { type: 'ready'; version: string }
   | { type: 'init-error'; message: string }
-  /** `verdict` is the engine's JSON text; `durationMs` is the engine call's wall time. */
-  | { type: 'scan'; id: number; verdict: string; durationMs: number }
+  /**
+   * `verdict` is the engine's JSON text; `durationMs` is the engine call's
+   * wall time; `memory` the WASM memory size after it (bytes; it never
+   * shrinks, so the scanner replaces a worker that grew too much).
+   */
+  | { type: 'scan'; id: number; verdict: string; durationMs: number; memory?: number }
+  /** The worker could not read the `blob` (whole-file fallback only). */
+  | { type: 'input-error'; id: number; message: string }
   | { type: 'rules'; id: number; rules: string }
   /** The engine threw or trapped; the worker must not be reused. */
   | { type: 'fail'; id: number; message: string };

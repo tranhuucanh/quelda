@@ -139,44 +139,142 @@ pub fn parse_indirect_object_extent(
     offset: usize,
     limits: &Limits,
 ) -> (Result<IndirectObject, ParseError>, usize) {
-    let mut p = Parser::new(src, offset, limits);
-    let mut scanned = 0;
-    let result = indirect_object(&mut p, src, &mut scanned);
-    (result, p.lex.furthest().max(scanned))
+    let (head, furthest) = indirect_head(src, offset, limits);
+    match head {
+        Err(e) => (Err(e), furthest),
+        Ok(Head::Done(o)) => (Ok(o), furthest),
+        Ok(Head::Stream(h)) => {
+            let mut scanned = 0;
+            match locate_stream(src, h.dict, h.after_kw, &mut scanned) {
+                Err(e) => (Err(e), furthest.max(scanned)),
+                Ok((stream, end)) => {
+                    let (has_endobj, end, f) = endobj_at(src, end);
+                    let o = IndirectObject {
+                        id: h.id,
+                        offset: h.start,
+                        object: PdfObject::Stream(Box::new(stream)),
+                        has_endobj,
+                        end,
+                    };
+                    (Ok(o), furthest.max(f).max(scanned))
+                }
+            }
+        }
+    }
 }
 
-fn indirect_object(
-    p: &mut Parser<'_>,
+/// An indirect object parsed up to its value: complete, or a stream
+/// dictionary whose data is still to be located.
+#[derive(Debug)]
+pub(crate) enum Head {
+    Done(IndirectObject),
+    Stream(StreamHead),
+}
+
+#[derive(Debug)]
+pub(crate) struct StreamHead {
+    pub start: usize,
+    pub id: ObjRef,
+    pub dict: Dict,
+    /// Offset right after the `stream` keyword.
+    pub after_kw: usize,
+}
+
+/// `N G obj <value>`, then `endobj` unless the value is a stream dictionary
+/// (whose data [`locate_stream`] finds, then [`endobj_at`]). Lexing reads no
+/// byte past the furthest offset returned.
+pub(crate) fn indirect_head(
     src: &[u8],
-    scanned: &mut usize,
-) -> Result<IndirectObject, ParseError> {
+    offset: usize,
+    limits: &Limits,
+) -> (Result<Head, ParseError>, usize) {
+    let mut p = Parser::new(src, offset, limits);
+    let result = head(&mut p);
+    (result, p.lex.furthest())
+}
+
+fn head(p: &mut Parser<'_>) -> Result<Head, ParseError> {
     let (start, id) = p.object_header()?;
-    let mut object = p.value()?;
+    let object = p.value()?;
     if let PdfObject::Dict(dict) = object {
-        object = match p.stream_keyword() {
+        match p.stream_keyword() {
             Some(after_kw) => {
-                let (stream, end) = locate_stream(src, dict, after_kw, scanned)?;
-                p.lex.set_pos(end);
-                PdfObject::Stream(Box::new(stream))
+                return Ok(Head::Stream(StreamHead {
+                    start,
+                    id,
+                    dict,
+                    after_kw,
+                }));
             }
-            None => PdfObject::Dict(dict),
-        };
+            None => return Ok(Head::Done(finish(p, start, id, PdfObject::Dict(dict)))),
+        }
     }
-    let before = p.lex.pos();
-    let has_endobj = matches!(
-        p.lex.next_token(),
-        Ok(Some((_, Token::Keyword(Keyword::EndObj))))
-    );
-    if !has_endobj {
-        p.lex.set_pos(before);
-    }
-    Ok(IndirectObject {
+    Ok(Head::Done(finish(p, start, id, object)))
+}
+
+fn finish(p: &mut Parser<'_>, start: usize, id: ObjRef, object: PdfObject) -> IndirectObject {
+    let (has_endobj, end) = endobj(&mut p.lex);
+    IndirectObject {
         id,
         offset: start,
         object,
         has_endobj,
-        end: p.lex.pos(),
-    })
+        end,
+    }
+}
+
+/// `endobj` next? Returns it and the end of the object (after `endobj`, or
+/// where the lexer was).
+fn endobj(lex: &mut Lexer<'_>) -> (bool, usize) {
+    let before = lex.pos();
+    let has_endobj = matches!(
+        lex.next_token(),
+        Ok(Some((_, Token::Keyword(Keyword::EndObj))))
+    );
+    if !has_endobj {
+        lex.set_pos(before);
+    }
+    (has_endobj, lex.pos())
+}
+
+/// [`endobj`] at `end` (after `endstream`): `(has_endobj, end, furthest)`.
+pub(crate) fn endobj_at(src: &[u8], end: usize) -> (bool, usize, usize) {
+    let mut lex = Lexer::at(src, end);
+    let (has, end) = endobj(&mut lex);
+    (has, end, lex.furthest())
+}
+
+/// Random access to the input beyond a lexing window: what locating stream
+/// data needs (a slice, or [`crate::source`]'s input).
+pub(crate) trait Bytes {
+    fn len(&self) -> usize;
+    fn byte(&self, i: usize) -> Option<u8>;
+    /// Offset of the first `endstream` starting at or after `from`.
+    fn find_endstream(&self, from: usize) -> Option<usize>;
+
+    fn starts_with_at(&self, i: usize, pat: &[u8]) -> bool {
+        pat.iter()
+            .enumerate()
+            .all(|(k, &b)| self.byte(i + k) == Some(b))
+    }
+}
+
+impl Bytes for [u8] {
+    fn len(&self) -> usize {
+        <[u8]>::len(self)
+    }
+
+    fn byte(&self, i: usize) -> Option<u8> {
+        self.get(i).copied()
+    }
+
+    fn find_endstream(&self, from: usize) -> Option<usize> {
+        Some(from + find(self.get(from..)?, b"endstream")?)
+    }
+
+    fn starts_with_at(&self, i: usize, pat: &[u8]) -> bool {
+        self.get(i..).is_some_and(|r| r.starts_with(pat))
+    }
 }
 
 /// How many bytes [`object_header_at`] looks at: enough for `N G obj` with
@@ -208,16 +306,23 @@ pub fn stream_data_with_length(
     data_start: usize,
     length: u64,
 ) -> Option<(Range<usize>, usize)> {
+    data_with_length(src, data_start, length)
+}
+
+pub(crate) fn data_with_length<B: Bytes + ?Sized>(
+    src: &B,
+    data_start: usize,
+    length: u64,
+) -> Option<(Range<usize>, usize)> {
     let end = data_start.checked_add(usize::try_from(length).ok()?)?;
     if end > src.len() {
         return None;
     }
     let mut i = end;
-    while src.get(i).copied().is_some_and(is_whitespace) {
+    while src.byte(i).is_some_and(is_whitespace) {
         i += 1;
     }
-    src.get(i..)?
-        .starts_with(b"endstream")
+    src.starts_with_at(i, b"endstream")
         .then(|| (data_start..end, i + b"endstream".len()))
 }
 
@@ -225,13 +330,19 @@ pub fn stream_data_with_length(
 /// the EOL right before `endstream` is not data. Returns the offset after
 /// `endstream` too.
 pub fn stream_data_by_scan(src: &[u8], data_start: usize) -> Option<(Range<usize>, usize)> {
-    let rest = src.get(data_start..)?;
-    let at = data_start + find(rest, b"endstream")?;
+    data_by_scan(src, data_start)
+}
+
+fn data_by_scan<B: Bytes + ?Sized>(src: &B, data_start: usize) -> Option<(Range<usize>, usize)> {
+    if data_start > src.len() {
+        return None;
+    }
+    let at = src.find_endstream(data_start)?;
     let mut end = at;
-    if end > data_start && src[end - 1] == b'\n' {
+    if end > data_start && src.byte(end - 1) == Some(b'\n') {
         end -= 1;
     }
-    if end > data_start && src[end - 1] == b'\r' {
+    if end > data_start && src.byte(end - 1) == Some(b'\r') {
         end -= 1;
     }
     Some((data_start..end, at + b"endstream".len()))
@@ -243,14 +354,14 @@ fn find(hay: &[u8], needle: &[u8]) -> Option<usize> {
 
 /// `after_kw` is the offset right after the `stream` keyword.
 /// `scanned` is set to how far the search for `endstream` went.
-fn locate_stream(
-    src: &[u8],
+pub(crate) fn locate_stream<B: Bytes + ?Sized>(
+    src: &B,
     dict: Dict,
     after_kw: usize,
     scanned: &mut usize,
 ) -> Result<(PdfStream, usize), ParseError> {
     // `stream` is followed by CRLF or LF (CR alone tolerated).
-    let data_start = match (src.get(after_kw), src.get(after_kw + 1)) {
+    let data_start = match (src.byte(after_kw), src.byte(after_kw + 1)) {
         (Some(b'\r'), Some(b'\n')) => after_kw + 2,
         (Some(b'\r' | b'\n'), _) => after_kw + 1,
         _ => after_kw,
@@ -258,7 +369,7 @@ fn locate_stream(
     let declared = dict.get("Length");
     let direct = declared.and_then(PdfObject::as_int);
     if let Some(len) = direct.and_then(|l| u64::try_from(l).ok()) {
-        if let Some((data, end)) = stream_data_with_length(src, data_start, len) {
+        if let Some((data, end)) = data_with_length(src, data_start, len) {
             let stream = PdfStream {
                 dict,
                 data_start,
@@ -273,7 +384,7 @@ fn locate_stream(
         None => StreamLength::Scanned { declared: direct },
     };
     *scanned = src.len();
-    let (data, end) = stream_data_by_scan(src, data_start).ok_or(ParseError::new(
+    let (data, end) = data_by_scan(src, data_start).ok_or(ParseError::new(
         ParseErrorKind::UnterminatedStream,
         after_kw,
     ))?;
@@ -287,13 +398,12 @@ fn locate_stream(
     Ok((stream, end))
 }
 
-/// Container being built.
+/// Container being built: its items/entries are `items[start..]` /
+/// `entries[start..]` of [`Parser::value`]'s scratch vectors, so each
+/// container is allocated once, at its exact size, when it closes.
 enum Frame {
-    Array(Vec<PdfObject>),
-    Dict {
-        entries: Vec<(Name, PdfObject)>,
-        key: Option<Name>,
-    },
+    Array { start: usize },
+    Dict { start: usize, key: Option<Name> },
 }
 
 struct Parser<'a> {
@@ -372,28 +482,35 @@ impl<'a> Parser<'a> {
 
     fn value(&mut self) -> Result<PdfObject, ParseError> {
         let mut stack: Vec<Frame> = Vec::new();
+        let mut items: Vec<PdfObject> = Vec::new();
+        let mut entries: Vec<(Name, PdfObject)> = Vec::new();
         loop {
             let (start, tok) = self.next()?;
             let unexpected = |kind| ParseError::new(kind, start);
             let value = match tok {
                 Token::ArrayOpen => {
-                    self.push(&mut stack, Frame::Array(Vec::new()), start)?;
+                    let frame = Frame::Array { start: items.len() };
+                    self.push(&mut stack, frame, start)?;
                     continue;
                 }
                 Token::DictOpen => {
                     let frame = Frame::Dict {
-                        entries: Vec::new(),
+                        start: entries.len(),
                         key: None,
                     };
                     self.push(&mut stack, frame, start)?;
                     continue;
                 }
                 Token::ArrayClose => match stack.pop() {
-                    Some(Frame::Array(items)) => PdfObject::Array(items),
+                    Some(Frame::Array { start }) => {
+                        PdfObject::Array(items.drain(start..).collect())
+                    }
                     _ => return Err(unexpected(ParseErrorKind::UnexpectedToken)),
                 },
                 Token::DictClose => match stack.pop() {
-                    Some(Frame::Dict { entries, key: None }) => PdfObject::Dict(Dict::new(entries)),
+                    Some(Frame::Dict { start, key: None }) => {
+                        PdfObject::Dict(Dict::new(entries.drain(start..).collect()))
+                    }
                     Some(Frame::Dict { key: Some(_), .. }) => {
                         return Err(unexpected(ParseErrorKind::DictMissingValue));
                     }
@@ -412,8 +529,8 @@ impl<'a> Parser<'a> {
             };
             match stack.last_mut() {
                 None => return Ok(value),
-                Some(Frame::Array(items)) => items.push(value),
-                Some(Frame::Dict { entries, key }) => match key.take() {
+                Some(Frame::Array { .. }) => items.push(value),
+                Some(Frame::Dict { key, .. }) => match key.take() {
                     Some(k) => entries.push((k, value)),
                     None => match value {
                         PdfObject::Name(n) => *key = Some(n),
