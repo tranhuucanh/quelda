@@ -1,6 +1,6 @@
 [package]
 name = "quelda-eval"
-description = "Dev-only: run quelda over a corpus directory and write CSV / JSONL results (plan Step 13)"
+description = "Dev-only: corpus evaluation (plan Step 13) and benchmarks (Step 16)"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,8 +10,14 @@ publish = false
 
 [dependencies]
 quelda-core.workspace = true
+libc = "0.2"
 serde_json = "1"
+sha2 = "0.11.0"
 
 [[bin]]
 name = "quelda-eval"
 path = "src/bin/quelda-eval.rs"
+
+[[bin]]
+name = "quelda-bench"
+path = "src/bin/quelda-bench.rs"
