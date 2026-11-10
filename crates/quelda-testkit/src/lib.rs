@@ -1,5 +1,12 @@
-//! Dev-only test kit: `PdfBuilder` and the fixture generator (Step 2).
+//! Dev-only test kit: `PdfBuilder` and the fixture generator.
 //! Payloads are always harmless; never put a real exploit here.
+
+pub mod builder;
+pub mod filters;
+pub mod names;
+
+pub use builder::{PdfBuilder, Xref};
+pub use filters::Filter;
 
 /// Returns the testkit version.
 pub fn version() -> &'static str {
