@@ -165,9 +165,12 @@ impl fmt::Debug for Dict {
 pub enum StreamLength {
     /// Direct `/Length`, and `endstream` follows the declared data.
     Declared,
-    /// `/Length` is an indirect reference that must be resolved (Step 5);
-    /// until then `data` comes from scanning for `endstream`.
+    /// `/Length` is an indirect reference not (yet) resolved to a length
+    /// that `endstream` follows: `data` comes from scanning for `endstream`.
     Indirect(ObjRef),
+    /// `/Length` is an indirect reference, resolved (see
+    /// `parser::document`), and `endstream` follows the data it gives.
+    ResolvedIndirect(ObjRef),
     /// `/Length` missing, not a non-negative integer, or wrong (`endstream`
     /// not where it points): `data` comes from scanning for `endstream`.
     Scanned { declared: Option<i64> },

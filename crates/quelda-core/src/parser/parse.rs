@@ -106,9 +106,19 @@ pub fn parse_object(
     offset: usize,
     limits: &Limits,
 ) -> Result<(PdfObject, usize), ParseError> {
+    parse_object_extent(src, offset, limits).0
+}
+
+/// [`parse_object`], plus the furthest offset examined (the work done, also
+/// when parsing fails).
+pub fn parse_object_extent(
+    src: &[u8],
+    offset: usize,
+    limits: &Limits,
+) -> (Result<(PdfObject, usize), ParseError>, usize) {
     let mut p = Parser::new(src, offset, limits);
-    let obj = p.value()?;
-    Ok((obj, p.lex.pos()))
+    let result = p.value().map(|obj| (obj, p.lex.pos()));
+    (result, p.lex.furthest())
 }
 
 /// Parses `N G obj <value> [stream … endstream] [endobj]` starting at `offset`
@@ -119,13 +129,33 @@ pub fn parse_indirect_object(
     offset: usize,
     limits: &Limits,
 ) -> Result<IndirectObject, ParseError> {
+    parse_indirect_object_extent(src, offset, limits).0
+}
+
+/// [`parse_indirect_object`], plus the furthest offset examined (the work
+/// done, also when parsing fails; scanning for `endstream` included).
+pub fn parse_indirect_object_extent(
+    src: &[u8],
+    offset: usize,
+    limits: &Limits,
+) -> (Result<IndirectObject, ParseError>, usize) {
     let mut p = Parser::new(src, offset, limits);
+    let mut scanned = 0;
+    let result = indirect_object(&mut p, src, &mut scanned);
+    (result, p.lex.furthest().max(scanned))
+}
+
+fn indirect_object(
+    p: &mut Parser<'_>,
+    src: &[u8],
+    scanned: &mut usize,
+) -> Result<IndirectObject, ParseError> {
     let (start, id) = p.object_header()?;
     let mut object = p.value()?;
     if let PdfObject::Dict(dict) = object {
         object = match p.stream_keyword() {
             Some(after_kw) => {
-                let (stream, end) = locate_stream(src, dict, after_kw)?;
+                let (stream, end) = locate_stream(src, dict, after_kw, scanned)?;
                 p.lex.set_pos(end);
                 PdfObject::Stream(stream)
             }
@@ -147,6 +177,27 @@ pub fn parse_indirect_object(
         has_endobj,
         end: p.lex.pos(),
     })
+}
+
+/// How many bytes [`object_header_at`] looks at: enough for `N G obj` with
+/// some whitespace, small enough that checking many offsets stays cheap.
+pub const HEADER_WINDOW: usize = 256;
+
+/// `N G obj` at `offset` (after optional whitespace/comments, all within
+/// [`HEADER_WINDOW`] bytes): the offset of `N` and the id. Cheap and bounded,
+/// for checking where an xref entry points.
+pub fn object_header_at(src: &[u8], offset: usize) -> Option<(usize, ObjRef)> {
+    let window = src.get(..offset.saturating_add(HEADER_WINDOW).min(src.len()))?;
+    let mut lex = Lexer::at(window, offset);
+    let mut tok = || lex.next_token().ok().flatten();
+    match (tok(), tok(), tok()) {
+        (
+            Some((start, Token::Int(num))),
+            Some((_, Token::Int(generation))),
+            Some((_, Token::Keyword(Keyword::Obj))),
+        ) => ObjRef::from_ints(num, generation).map(|id| (start, id)),
+        _ => None,
+    }
 }
 
 /// Given stream data starting at `data_start` and a length, returns the data
@@ -191,10 +242,12 @@ fn find(hay: &[u8], needle: &[u8]) -> Option<usize> {
 }
 
 /// `after_kw` is the offset right after the `stream` keyword.
+/// `scanned` is set to how far the search for `endstream` went.
 fn locate_stream(
     src: &[u8],
     dict: Dict,
     after_kw: usize,
+    scanned: &mut usize,
 ) -> Result<(PdfStream, usize), ParseError> {
     // `stream` is followed by CRLF or LF (CR alone tolerated).
     let data_start = match (src.get(after_kw), src.get(after_kw + 1)) {
@@ -219,10 +272,12 @@ fn locate_stream(
         Some(r) => StreamLength::Indirect(r),
         None => StreamLength::Scanned { declared: direct },
     };
+    *scanned = src.len();
     let (data, end) = stream_data_by_scan(src, data_start).ok_or(ParseError::new(
         ParseErrorKind::UnterminatedStream,
         after_kw,
     ))?;
+    *scanned = end;
     let stream = PdfStream {
         dict,
         data_start,

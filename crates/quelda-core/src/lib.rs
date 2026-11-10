@@ -1,8 +1,8 @@
 //! quelda scan engine: one PDF + policy in, verdict out.
 //!
-//! Layers (design §4): parser → facts → rules → policy. So far: the lexer
-//! and object model (`parser`), stream decoding (`filters`), engine issues
-//! and limits.
+//! Layers (design §4): parser → facts → rules → policy. So far: the lexer,
+//! object model and union object set (`parser`, `parser::Document`), stream
+//! decoding (`filters`), engine issues and limits.
 
 #![forbid(unsafe_code)]
 // Input must never be able to crash the engine (design: fail-closed, no panics).
