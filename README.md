@@ -6,12 +6,51 @@ or previews the file. Its main job is to block files that attack server PDF pipe
 (Ghostscript, ImageMagick): PostScript/EPS disguised as PDF, embedded PostScript, JavaScript,
 Launch actions, and malformed structure.
 
-The core engine is written in Rust and ships in two forms:
+The core engine is written in Rust and ships in two forms that give the same verdicts:
 
-- a WebAssembly build, published to npm as `quelda`, for early checks in the browser;
-- a native CLI, `quelda`, for backends written in any language.
+- a native CLI, `quelda`, for backends written in any language ([docs/cli.md](docs/cli.md));
+- a WebAssembly build, published to npm as [`quelda`](packages/quelda-js/README.md), for early
+  checks in the browser.
 
-> **Status:** early development, not usable yet.
+> **Status:** first release (0.x). The verdict format and rule IDs are stable; defaults may
+> still be tuned. See the [changelog](CHANGELOG.md).
+
+## Install
+
+```bash
+brew install tranhuucanh/quelda/quelda          # macOS (Apple Silicon), Linux
+npm install quelda                              # browser / Node package
+```
+
+Static Linux binaries (x64, arm64) and the macOS binary are on
+[GitHub Releases](https://github.com/tranhuucanh/quelda/releases/latest), with `SHA256SUMS`
+and build provenance attestations. See [docs/cli.md](docs/cli.md#install) for `curl`, Docker
+and source installs.
+
+## Quick start
+
+```bash
+quelda scan upload.pdf                          # JSON verdict on stdout
+quelda scan upload.pdf --preset strict --format text
+quelda rules --format text                      # every rule and its default action
+```
+
+Exit code `0` means valid; `1` rejected; `2` could not be inspected (invalid); `64` usage
+error. **Treat anything other than `0` as invalid.** From a backend, call it with an argument
+array (no shell) and a timeout: see the examples for
+[Python, Ruby, Node.js, Go, PHP and Java](docs/cli.md#call-it-from-your-backend).
+
+In the browser:
+
+```ts
+import { createScanner } from 'quelda';
+
+const scanner = await createScanner();
+const verdict = await scanner.scan(file, { preset: 'strict' });
+if (!verdict.valid) showReasons(verdict.violations);
+```
+
+A browser check is a convenience, not a security boundary: always scan again on the server.
 
 ## Supported files
 
@@ -49,6 +88,22 @@ cargo run -p quelda-wasm --example wasm_golden      # native verdicts the packag
 cd packages/quelda-js && npm ci && npm test && npm run test:examples
 ```
 
+CLI as released (static Linux binary in containers, caller examples in each language's image;
+needs Docker and Node ≥ 20):
+
+```bash
+cargo run -p quelda-wasm --example wasm_golden      # native verdicts every binary must match
+CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER=rust-lld \
+  cargo build --release -p quelda-cli --target x86_64-unknown-linux-musl
+node scripts/cli-dist-test.mjs --bin target/x86_64-unknown-linux-musl/release/quelda --docker linux/amd64
+node scripts/docs-examples-test.mjs --bin target/x86_64-unknown-linux-musl/release/quelda --docker linux/amd64
+```
+
+Releases: `scripts/bump-version.sh X.Y.Z` (or `X.Y.Z-rc.N`) sets the one version everywhere;
+merge to `main`, then push the tag `vX.Y.Z`. `.github/workflows/release.yml` builds and tests
+the binaries, publishes the GitHub Release, the npm package and (final releases) the Homebrew
+formula.
+
 | Path | Contents |
 |---|---|
 | `crates/quelda-core` | Engine: parser, filters, facts, rules, policy, verdict |
@@ -56,9 +111,16 @@ cd packages/quelda-js && npm ci && npm test && npm run test:examples
 | `crates/quelda-cli` | `quelda` CLI (thin wrapper) |
 | `crates/quelda-testkit` | Dev-only: deterministic PDF builder and fixture generator |
 | `packages/quelda-js` | npm package `quelda` |
-| `schemas/` | JSON Schemas for policy and verdict |
+| `schemas/` | JSON Schemas for policy, verdict and rule list |
 | `fuzz/` | cargo-fuzz targets |
+| `docs/cli.md` | CLI guide: install, options, exit codes, policy, backend examples |
+| `docs/examples/cli/` | Backend caller examples (tested) |
 | `docs/ADDING_A_RULE.md` | Checklist for adding a rule |
+| `packaging/homebrew/` | Homebrew formula template |
+
+## Security
+
+Please report vulnerabilities privately, as described in [SECURITY.md](SECURITY.md).
 
 ## License
 

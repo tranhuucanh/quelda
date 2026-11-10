@@ -26,16 +26,25 @@ fn versions(root: &Path) -> Vec<(String, String)> {
 
     let cargo = read("Cargo.toml");
     let ws = &cargo[cargo.find("[workspace.package]").unwrap()..];
-    out.push(("Cargo.toml [workspace.package]".into(), quoted_after(ws, "\nversion = \"")));
+    out.push((
+        "Cargo.toml [workspace.package]".into(),
+        quoted_after(ws, "\nversion = \""),
+    ));
     out.push((
         "Cargo.toml quelda-core dependency".into(),
-        quoted_after(&cargo, "quelda-core = { path = \"crates/quelda-core\", version = \""),
+        quoted_after(
+            &cargo,
+            "quelda-core = { path = \"crates/quelda-core\", version = \"",
+        ),
     ));
 
     let lock = read("Cargo.lock");
     let mut crates = 0;
     for block in lock.split("[[package]]") {
-        if let Some(name) = block.lines().find_map(|l| l.strip_prefix("name = \"quelda-")) {
+        if let Some(name) = block
+            .lines()
+            .find_map(|l| l.strip_prefix("name = \"quelda-"))
+        {
             out.push((
                 format!("Cargo.lock quelda-{}", name.trim_end_matches('"')),
                 quoted_after(block, "\nversion = \""),
@@ -47,10 +56,16 @@ fn versions(root: &Path) -> Vec<(String, String)> {
 
     let pkg = "packages/quelda-js";
     let s = |v: &Value| v.as_str().unwrap_or("<missing>").to_string();
-    out.push((format!("{pkg}/package.json"), s(&json(&format!("{pkg}/package.json"))["version"])));
+    out.push((
+        format!("{pkg}/package.json"),
+        s(&json(&format!("{pkg}/package.json"))["version"]),
+    ));
     let lock = json(&format!("{pkg}/package-lock.json"));
     out.push((format!("{pkg}/package-lock.json"), s(&lock["version"])));
-    out.push((format!("{pkg}/package-lock.json packages.\"\""), s(&lock["packages"][""]["version"])));
+    out.push((
+        format!("{pkg}/package-lock.json packages.\"\""),
+        s(&lock["packages"][""]["version"]),
+    ));
     for ex in ["vite", "webpack"] {
         let p = format!("{pkg}/examples/{ex}/package-lock.json");
         out.push((p.clone(), s(&json(&p)["packages"]["../.."]["version"])));
@@ -78,7 +93,11 @@ fn every_place_has_the_cargo_version() {
 fn changelog_has_a_section_for_this_version() {
     let changelog = fs::read_to_string(repo().join("CHANGELOG.md")).unwrap();
     let heading = format!("\n## [{}]", base(VERSION));
-    assert!(changelog.contains(&heading), "CHANGELOG.md: no `{}`", heading.trim());
+    assert!(
+        changelog.contains(&heading),
+        "CHANGELOG.md: no `{}`",
+        heading.trim()
+    );
 }
 
 /// Docs link `releases/latest` instead of spelling the version, so a release
@@ -130,7 +149,11 @@ fn bump_script_updates_every_place() {
     };
     for v in ["9.8.7-rc.3", "9.8.7", "10.0.0"] {
         let out = bump(v);
-        assert!(out.status.success(), "{v}: {}", String::from_utf8_lossy(&out.stderr));
+        assert!(
+            out.status.success(),
+            "{v}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
         let wrong: Vec<_> = versions(&tmp).into_iter().filter(|(_, x)| x != v).collect();
         assert!(wrong.is_empty(), "{v}: {wrong:?}");
         let changelog = fs::read_to_string(tmp.join("CHANGELOG.md")).unwrap();
@@ -143,8 +166,18 @@ fn bump_script_updates_every_place() {
     let before = fs::read_to_string(repo().join("Cargo.lock")).unwrap();
     let after = fs::read_to_string(tmp.join("Cargo.lock")).unwrap();
     assert_eq!(before.lines().count(), after.lines().count());
-    let changed = before.lines().zip(after.lines()).filter(|(a, b)| a != b).count();
-    assert_eq!(changed, versions(&repo()).iter().filter(|(p, _)| p.starts_with("Cargo.lock")).count());
+    let changed = before
+        .lines()
+        .zip(after.lines())
+        .filter(|(a, b)| a != b)
+        .count();
+    assert_eq!(
+        changed,
+        versions(&repo())
+            .iter()
+            .filter(|(p, _)| p.starts_with("Cargo.lock"))
+            .count()
+    );
 
     for bad in ["", "1.2", "v1.2.3", "1.2.3-beta.1", "01.2.3", "1.2.3-rc.0"] {
         assert_eq!(bump(bad).status.code(), Some(64), "{bad:?}");
