@@ -15,6 +15,51 @@ The core engine is written in Rust and ships in two forms that give the same ver
 > **Status:** first release (0.x). The verdict format and rule IDs are stable; defaults may
 > still be tuned. See the [changelog](CHANGELOG.md).
 
+## What quelda checks
+
+**40 rules in 11 categories**, plus 12 engine safeguards that refuse to judge what cannot be
+fully inspected. Full list with explanations: [docs/rules.md](docs/rules.md).
+
+| Category | Rules | Catches, for example |
+|---|---|---|
+| `filetype` | 4 | PostScript/EPS/legacy `.ai` renamed to `.pdf` (even behind a BOM or a printer header), SVG/HTML/MVG/ZIP/executables disguised as PDF, PDF + ZIP/HTML polyglots |
+| `postscript` | 3 | PostScript code inside a PDF: the `PS` operator, PostScript XObjects, non-standard Type 4 functions |
+| `active_content` | 5 | JavaScript (anywhere, any encoding), Launch actions, actions run on open or on events |
+| `embedded` | 4 | Attached files, file attachment annotations, portfolios, Flash/3D/multimedia |
+| `external` | 5 | Links, remote documents (SMB credential leaks), form submission to a URL, network file references |
+| `forms` | 2 | AcroForm and XFA forms |
+| `xml` | 1 | DOCTYPE/ENTITY in XMP or XFA (XXE, billion laughs), in UTF-8/16/32 |
+| `structure` | 9 | Tampered or ambiguous structure: hidden revisions, conflicting objects, mismatched xref, page-tree loops, data after `%%EOF`, multiple headers |
+| `encryption` | 1 | Encrypted files whose content cannot be inspected |
+| `codecs` | 3 | JBIG2 (FORCEDENTRY), JPEG 2000, Type 1 fonts |
+| `resource` | 3 | Pixel bombs, gigantic or broken pages, page-count bombs |
+
+The engine safeguards stop compression bombs, absurd nesting, object floods, endless revision
+chains and crafted overlapping objects, and reject damaged data that must be inspected: such a
+file is `ERROR` (invalid), never silently passed.
+
+How it looks at a file:
+
+- **Content, not names.** A file is identified by its bytes; `invoice.pdf` that is really
+  PostScript is rejected before anything else.
+- **Everything, every time.** Every object of every revision is scanned, including old
+  revisions, objects hidden from the cross-reference table and objects packed in compressed
+  object streams. quelda never repairs a file and picks one interpretation: if any reader could
+  see it, it is checked.
+- **No obfuscation tricks.** Names (`/J#61vaScript`), strings (hex, UTF-16) and streams (Flate,
+  LZW, ASCII85, ASCIIHex, RunLength, stacked) are decoded before any rule looks at them.
+- **Fail-closed.** Anything it cannot parse, decode or read makes the file invalid.
+- **Fast and light.** It reads only what it needs: on an Apple M2 Pro, a real 100 MB PDF takes
+  0.07 s and 8 MB of memory, and a 1 GB PDF of images 0.5 s and 3 MB (with `max_file_bytes`
+  raised). Our slowest test file, built with nearly a million objects, takes under 2 s.
+- **Same verdict everywhere.** The CLI, the browser package and the Rust library run the same
+  engine; every release is tested to give identical verdicts on hundreds of generated attack
+  files and conformance cases.
+
+How strict it is depends on the [policy](docs/policy.md): three presets (`strict`, `balanced`,
+`permissive`), then per-category and per-rule changes. A policy adjusts a preset; every rule
+always runs.
+
 ## Install
 
 ```bash
@@ -113,7 +158,9 @@ formula.
 | `packages/quelda-js` | npm package `quelda` |
 | `schemas/` | JSON Schemas for policy, verdict and rule list |
 | `fuzz/` | cargo-fuzz targets |
-| `docs/cli.md` | CLI guide: install, options, exit codes, policy, backend examples |
+| `docs/cli.md` | CLI guide: install, options, exit codes, verdict, backend examples |
+| `docs/policy.md` | Policies: how they work, presets, custom policies, limits, engine errors |
+| `docs/rules.md` | Every rule: what it catches, action per preset |
 | `docs/examples/cli/` | Backend caller examples (tested) |
 | `docs/ADDING_A_RULE.md` | Checklist for adding a rule |
 | `packaging/homebrew/` | Homebrew formula template |

@@ -41,6 +41,23 @@ pub enum IssueCode {
 }
 
 impl IssueCode {
+    /// Every code (docs list them; a test keeps the list complete).
+    pub const ALL: [IssueCode; 13] = [
+        IssueCode::EngineParse,
+        IssueCode::EngineUndecodable,
+        IssueCode::EngineRead,
+        IssueCode::LimitFileBytes,
+        IssueCode::LimitObjects,
+        IssueCode::LimitRevisions,
+        IssueCode::LimitNestingDepth,
+        IssueCode::LimitStreamDecodedBytes,
+        IssueCode::LimitDecodedBytes,
+        IssueCode::LimitCompressionRatio,
+        IssueCode::LimitFilterChain,
+        IssueCode::LimitParseWork,
+        IssueCode::PolicyInvalid,
+    ];
+
     /// The code as written in the verdict, e.g. `LIMIT.NESTING_DEPTH`.
     pub fn as_str(self) -> &'static str {
         match self {
@@ -103,6 +120,29 @@ impl fmt::Display for EngineIssue {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn all_lists_every_code_once() {
+        // Exhaustive: a new variant fails to compile here until added to ALL.
+        let position = |c: IssueCode| match c {
+            IssueCode::EngineParse => 0,
+            IssueCode::EngineUndecodable => 1,
+            IssueCode::EngineRead => 2,
+            IssueCode::LimitFileBytes => 3,
+            IssueCode::LimitObjects => 4,
+            IssueCode::LimitRevisions => 5,
+            IssueCode::LimitNestingDepth => 6,
+            IssueCode::LimitStreamDecodedBytes => 7,
+            IssueCode::LimitDecodedBytes => 8,
+            IssueCode::LimitCompressionRatio => 9,
+            IssueCode::LimitFilterChain => 10,
+            IssueCode::LimitParseWork => 11,
+            IssueCode::PolicyInvalid => 12,
+        };
+        for (i, c) in IssueCode::ALL.iter().enumerate() {
+            assert_eq!(position(*c), i, "{c}");
+        }
+    }
 
     #[test]
     fn codes_are_stable_strings() {
