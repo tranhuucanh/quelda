@@ -38,7 +38,7 @@ impl Filter {
     /// Encodes `data` so that this filter decodes it back.
     pub fn encode(self, data: &[u8]) -> Vec<u8> {
         match self {
-            Filter::Flate => compress_to_vec_zlib(data, 9),
+            Filter::Flate => flate(data),
             Filter::AsciiHex => ascii_hex(data),
             Filter::Ascii85 => ascii85(data),
             Filter::Lzw => lzw(data),
@@ -67,6 +67,76 @@ pub fn filter_entry(filters: &[Filter]) -> String {
             format!("/Filter [{}]", names.join(" "))
         }
     }
+}
+
+/// Small inputs use fixed-Huffman literals: deflate would otherwise pick a
+/// *stored* block for short text, leaving the payload readable as plain bytes
+/// and defeating the point of a "hidden in a compressed stream" fixture.
+fn flate(data: &[u8]) -> Vec<u8> {
+    if data.len() <= 4096 {
+        zlib_fixed_literals(data)
+    } else {
+        compress_to_vec_zlib(data, 9)
+    }
+}
+
+fn zlib_fixed_literals(data: &[u8]) -> Vec<u8> {
+    let mut w = LsbWriter::default();
+    w.put(1, 1); // BFINAL
+    w.put(1, 2); // BTYPE = 01, fixed Huffman
+    for &b in data {
+        let (code, len) = if b < 144 {
+            (0x30 + u32::from(b), 8)
+        } else {
+            (0x190 + u32::from(b) - 144, 9)
+        };
+        w.put(reverse_bits(code, len), len);
+    }
+    w.put(0, 7); // end of block (symbol 256)
+    let mut out = vec![0x78, 0x01];
+    out.extend(w.finish());
+    out.extend_from_slice(&adler32(data).to_be_bytes());
+    out
+}
+
+/// Deflate packs bits LSB-first; Huffman codes are stored MSB-first.
+fn reverse_bits(code: u32, len: u32) -> u32 {
+    (0..len).fold(0, |acc, i| (acc << 1) | ((code >> i) & 1))
+}
+
+#[derive(Default)]
+struct LsbWriter {
+    out: Vec<u8>,
+    acc: u64,
+    bits: u32,
+}
+
+impl LsbWriter {
+    fn put(&mut self, value: u32, len: u32) {
+        self.acc |= u64::from(value) << self.bits;
+        self.bits += len;
+        while self.bits >= 8 {
+            self.out.push(self.acc as u8);
+            self.acc >>= 8;
+            self.bits -= 8;
+        }
+    }
+
+    fn finish(mut self) -> Vec<u8> {
+        if self.bits > 0 {
+            self.out.push(self.acc as u8);
+        }
+        self.out
+    }
+}
+
+fn adler32(data: &[u8]) -> u32 {
+    let (mut a, mut b) = (1u32, 0u32);
+    for &x in data {
+        a = (a + u32::from(x)) % 65521;
+        b = (b + a) % 65521;
+    }
+    (b << 16) | a
 }
 
 fn ascii_hex(data: &[u8]) -> Vec<u8> {
@@ -387,6 +457,26 @@ mod tests {
             assert_eq!(un_lzw(&Filter::Lzw.encode(&data)), data, "lzw {len}");
             assert_eq!(un_rl(&Filter::RunLength.encode(&data)), data, "rl {len}");
         }
+    }
+
+    #[test]
+    fn small_flate_never_leaks_plaintext() {
+        for payload in [
+            &b"<< /S /Launch /F (quelda-test.txt) >>"[..],
+            b"q (% quelda-test) PS Q\n",
+        ] {
+            let enc = Filter::Flate.encode(payload);
+            assert!(
+                !enc.windows(6).any(|w| payload.windows(6).any(|p| p == w)),
+                "plaintext leaked"
+            );
+            assert_eq!(decompress_to_vec_zlib(&enc).unwrap(), payload);
+        }
+    }
+
+    #[test]
+    fn adler32_known_value() {
+        assert_eq!(adler32(b"Wikipedia"), 0x11E6_0398);
     }
 
     #[test]

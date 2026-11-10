@@ -3,7 +3,10 @@
 
 pub mod builder;
 pub mod filters;
+pub mod fixtures;
+pub mod manifest;
 pub mod names;
+pub mod rules;
 
 pub use builder::{PdfBuilder, Xref};
 pub use filters::Filter;
