@@ -594,8 +594,10 @@ dependencies = [
 name = "quelda-eval"
 version = "0.0.0"
 dependencies = [
+ "libc",
  "quelda-core",
  "serde_json",
+ "sha2",
 ]
 
 [[package]]

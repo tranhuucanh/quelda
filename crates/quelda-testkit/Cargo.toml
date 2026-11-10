@@ -16,3 +16,7 @@ serde_json = "1"
 [[bin]]
 name = "gen-fixtures"
 path = "src/bin/gen-fixtures.rs"
+
+[[bin]]
+name = "gen-heavy"
+path = "src/bin/gen-heavy.rs"

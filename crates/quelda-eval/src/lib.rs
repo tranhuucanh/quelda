@@ -7,6 +7,8 @@
 //! unlabelled (assumed good, the owner does not know). Matching is
 //! case-insensitive. Hidden files (`.DS_Store`, …) and symlinks are skipped.
 
+pub mod bench;
+
 use std::fmt::Write as _;
 use std::fs;
 use std::io;

@@ -5,6 +5,7 @@ pub mod builder;
 pub mod conformance;
 pub mod filters;
 pub mod fixtures;
+pub mod heavy;
 pub mod manifest;
 pub mod names;
 pub mod rules;
