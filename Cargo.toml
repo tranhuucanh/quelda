@@ -37,3 +37,6 @@ strip = true
 inherits = "release"
 opt-level = "z"
 panic = "abort"
+# wasm-bindgen needs the `target_features` section; scripts/wasm-build.sh
+# strips names/debug with wasm-opt after wasm-bindgen.
+strip = false

@@ -39,6 +39,14 @@ pub fn list_rules() -> Vec<rules::RuleInfo> {
     rules::registry::list()
 }
 
+/// [`list_rules`] as a JSON array (the contract bindings expose): one object
+/// per rule with `id`, `category`, `severity`, `default_action`, `locked`,
+/// `stage`, `since`, `message`, `description`.
+pub fn list_rules_json() -> String {
+    // Unreachable for these types; still never panic.
+    serde_json::to_string(&list_rules()).unwrap_or_else(|_| "[]".to_string())
+}
+
 /// Scans one file under `policy`. Never panics; anything the engine cannot
 /// inspect makes the verdict `ERROR` (`valid: false`).
 pub fn scan(input: &[u8], policy: &Policy) -> Verdict {
@@ -315,5 +323,25 @@ mod tests {
         let ids: Vec<_> = list_rules().iter().map(|r| r.id).collect();
         assert_eq!(ids.len(), rules::registry::all().len());
         assert!(ids.contains(&"ACTIVE.LAUNCH"));
+    }
+
+    #[test]
+    fn list_rules_json_matches_list_rules() {
+        let json: serde_json::Value = serde_json::from_str(&list_rules_json()).unwrap();
+        let arr = json.as_array().unwrap();
+        let rules = list_rules();
+        assert_eq!(arr.len(), rules.len());
+        for (j, r) in arr.iter().zip(&rules) {
+            assert_eq!(j["id"], r.id);
+            assert_eq!(j["category"], r.category.key());
+            assert_eq!(j["severity"], r.severity.key());
+            assert_eq!(j["default_action"], r.default_action.key());
+            assert_eq!(j["locked"], r.locked);
+            assert_eq!(j["stage"], r.stage.key());
+            assert_eq!(j["since"], r.since);
+            assert_eq!(j["message"], r.message);
+            assert_eq!(j["description"], r.description);
+            assert_eq!(j.as_object().unwrap().len(), 9);
+        }
     }
 }
