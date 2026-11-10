@@ -2,49 +2,15 @@
 //! needed). Object offsets are found by looking for `N G obj` at line starts,
 //! independently of the xref (Step 5 parses xrefs).
 
-use std::sync::OnceLock;
+mod common;
 
+use common::{fixture, fixtures, object_offsets};
 use quelda_core::error::IssueCode;
 use quelda_core::limits::Limits;
 use quelda_core::parser::{
     IndirectObject, PdfObject, StreamLength, parse_indirect_object, parse_object,
 };
 use quelda_testkit::fixtures::{Fixture, Kind};
-
-fn fixtures() -> &'static [Fixture] {
-    static ALL: OnceLock<Vec<Fixture>> = OnceLock::new();
-    ALL.get_or_init(quelda_testkit::fixtures::all)
-}
-
-fn fixture(path: &str) -> &'static Fixture {
-    fixtures()
-        .iter()
-        .find(|f| f.path == path)
-        .unwrap_or_else(|| panic!("no fixture {path}"))
-}
-
-/// Offsets of `<digits> <digits> obj` at the start of a line.
-fn object_offsets(pdf: &[u8]) -> Vec<usize> {
-    let mut out = Vec::new();
-    for i in 0..pdf.len() {
-        if i > 0 && !matches!(pdf[i - 1], b'\n' | b'\r') {
-            continue;
-        }
-        let mut j = i;
-        for _ in 0..2 {
-            let d = pdf[j..].iter().take_while(|b| b.is_ascii_digit()).count();
-            if d == 0 || pdf.get(j + d) != Some(&b' ') {
-                j = usize::MAX;
-                break;
-            }
-            j += d + 1;
-        }
-        if j != usize::MAX && pdf[j..].starts_with(b"obj") {
-            out.push(i);
-        }
-    }
-    out
-}
 
 /// Header numbers written at `off`, read without the parser.
 fn header_numbers(pdf: &[u8], off: usize) -> (u32, u16) {

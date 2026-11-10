@@ -509,6 +509,7 @@ mod tests {
     fn nesting_at_limit_is_ok() {
         let limits = Limits {
             max_nesting_depth: 5,
+            ..Limits::default()
         };
         assert!(parse_object(&nested(5), 0, &limits).is_ok());
         let arrays = b"[[[[[1]]]]]";
@@ -519,6 +520,7 @@ mod tests {
     fn nesting_over_limit_is_limit_issue() {
         let limits = Limits {
             max_nesting_depth: 5,
+            ..Limits::default()
         };
         let e = parse_object(&nested(6), 0, &limits).unwrap_err();
         assert_eq!(e.kind, ParseErrorKind::NestingDepth { limit: 5 });
@@ -538,6 +540,7 @@ mod tests {
         assert_eq!(e.issue_code(), IssueCode::LimitNestingDepth);
         let huge = Limits {
             max_nesting_depth: u32::MAX,
+            ..Limits::default()
         };
         let e = parse_object(&nested(100_000), 0, &huge).unwrap_err();
         assert_eq!(
@@ -557,6 +560,7 @@ mod tests {
                 let depth = crate::limits::HARD_MAX_NESTING_DEPTH as usize;
                 let huge = Limits {
                     max_nesting_depth: u32::MAX,
+                    ..Limits::default()
                 };
                 for src in [
                     nested(depth),

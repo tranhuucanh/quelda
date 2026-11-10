@@ -49,6 +49,7 @@ dependencies = [
 name = "quelda-core"
 version = "0.0.0"
 dependencies = [
+ "miniz_oxide",
  "quelda-testkit",
 ]
 

@@ -40,6 +40,7 @@ fn random_input(rng: &mut XorShift) -> Vec<u8> {
 fn exercise(input: &[u8]) {
     let limits = Limits {
         max_nesting_depth: 16,
+        ..Limits::default()
     };
     let mut lx = Lexer::new(input);
     let mut steps = 0;

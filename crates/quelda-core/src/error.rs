@@ -11,6 +11,14 @@ pub enum IssueCode {
     EngineParse,
     /// Arrays/dictionaries nested deeper than `max_nesting_depth`.
     LimitNestingDepth,
+    /// All streams together decode to more than `max_decoded_bytes_total`.
+    LimitDecodedBytes,
+    /// One stream decodes to more than `max_decoded_bytes_per_stream`.
+    LimitStreamDecodedBytes,
+    /// One stream decodes to more than `max_compression_ratio` × its raw size.
+    LimitCompressionRatio,
+    /// More filters on one stream than the engine will run.
+    LimitFilterChain,
 }
 
 impl IssueCode {
@@ -19,6 +27,10 @@ impl IssueCode {
         match self {
             IssueCode::EngineParse => "ENGINE.PARSE",
             IssueCode::LimitNestingDepth => "LIMIT.NESTING_DEPTH",
+            IssueCode::LimitDecodedBytes => "LIMIT.DECODED_BYTES",
+            IssueCode::LimitStreamDecodedBytes => "LIMIT.STREAM_DECODED_BYTES",
+            IssueCode::LimitCompressionRatio => "LIMIT.COMPRESSION_RATIO",
+            IssueCode::LimitFilterChain => "LIMIT.FILTER_CHAIN",
         }
     }
 
@@ -70,11 +82,22 @@ mod tests {
     fn codes_are_stable_strings() {
         assert_eq!(IssueCode::EngineParse.as_str(), "ENGINE.PARSE");
         assert_eq!(IssueCode::LimitNestingDepth.as_str(), "LIMIT.NESTING_DEPTH");
+        assert_eq!(IssueCode::LimitDecodedBytes.as_str(), "LIMIT.DECODED_BYTES");
+        assert_eq!(
+            IssueCode::LimitStreamDecodedBytes.as_str(),
+            "LIMIT.STREAM_DECODED_BYTES"
+        );
+        assert_eq!(
+            IssueCode::LimitCompressionRatio.as_str(),
+            "LIMIT.COMPRESSION_RATIO"
+        );
+        assert_eq!(IssueCode::LimitFilterChain.as_str(), "LIMIT.FILTER_CHAIN");
     }
 
     #[test]
     fn limit_codes_are_flagged() {
         assert!(IssueCode::LimitNestingDepth.is_limit());
+        assert!(IssueCode::LimitCompressionRatio.is_limit());
         assert!(!IssueCode::EngineParse.is_limit());
     }
 
