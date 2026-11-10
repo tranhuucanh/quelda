@@ -172,7 +172,8 @@ Working examples: [`examples/vite`](examples/vite), [`examples/webpack`](example
 **Content Security Policy:** WebAssembly needs `script-src 'wasm-unsafe-eval'`, and the worker
 needs `worker-src 'self'` (or wherever you serve it).
 
-**Browsers:** module workers and WebAssembly: Chrome/Edge 80+, Firefox 114+, Safari 15+.
+**Browsers:** module workers and WebAssembly: Chrome/Edge 91+, Firefox 114+, Safari 16.4+
+(the engine is built with WebAssembly SIMD).
 
 ## Node
 

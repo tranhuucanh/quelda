@@ -33,10 +33,11 @@ lto = true
 codegen-units = 1
 strip = true
 
-# WASM for the npm package: optimize for size (budget: design §8).
+# WASM for the npm package: optimized for speed, built with SIMD by
+# scripts/wasm-build.sh (ADR #31; size budget: design §8.2).
 [profile.release-wasm]
 inherits = "release"
-opt-level = "z"
+opt-level = 3
 panic = "abort"
 # wasm-bindgen needs the `target_features` section; scripts/wasm-build.sh
 # strips names/debug with wasm-opt after wasm-bindgen.

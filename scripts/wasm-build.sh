@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Builds the WASM package (design §8.2, plan Step 11):
-#   cargo (release-wasm, wasm32) → wasm-bindgen --target web → wasm-opt -Oz
+#   cargo (release-wasm, wasm32, +simd128) → wasm-bindgen --target web → wasm-opt -O3
 # then checks the size budget (scripts/wasm-size.mjs).
 #
 # Usage: scripts/wasm-build.sh [out_dir]      (default: target/wasm-pkg)
@@ -12,9 +12,9 @@
 #   wasm-opt      binaryen ≥ 116; override with WASM_OPT=/path/to/wasm-opt
 #   node          ≥ 18 (size check)
 # Set QUELDA_SKIP_BUDGET=1 to measure without failing on the budget.
-# Variants (plan Step 16): QUELDA_WASM_OPT=z|s|3 (rustc opt-level and
-# wasm-opt -O<level>, default from the release-wasm profile + -Oz),
-# QUELDA_WASM_SIMD=1 (rustc +simd128, wasm-opt --enable-simd).
+# The package build is opt-level 3 + SIMD (ADR #31: Chrome 91+, Firefox 89+,
+# Safari 16.4+). Variants for measuring (plan Step 16): QUELDA_WASM_OPT=z|s|3
+# (rustc opt-level and wasm-opt -O<level>), QUELDA_WASM_SIMD=0 (no simd128).
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -35,14 +35,14 @@ command -v "$wasm_opt" >/dev/null || {
 }
 
 opt="${QUELDA_WASM_OPT:-}"
-wasm_opt_level="-O${opt:-z}"
+wasm_opt_level="-O${opt:-3}"
 cargo_args=()
 if [[ -n "$opt" ]]; then
   [[ "$opt" =~ ^[0-9]$ ]] || opt="\"$opt\""
   cargo_args+=(--config "profile.release-wasm.opt-level=$opt")
 fi
 simd_args=()
-if [[ "${QUELDA_WASM_SIMD:-}" == 1 ]]; then
+if [[ "${QUELDA_WASM_SIMD:-1}" == 1 ]]; then
   export RUSTFLAGS="${RUSTFLAGS:-} -C target-feature=+simd128"
   simd_args+=(--enable-simd)
 fi
