@@ -1,13 +1,15 @@
 //! quelda scan engine: one PDF + policy in, verdict out.
 //!
 //! Layers (design §4): parser → facts → rules → policy. So far: the lexer
-//! and object model (`parser`), engine issues and limits.
+//! and object model (`parser`), stream decoding (`filters`), engine issues
+//! and limits.
 
 #![forbid(unsafe_code)]
 // Input must never be able to crash the engine (design: fail-closed, no panics).
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 pub mod error;
+pub mod filters;
 pub mod limits;
 pub mod parser;
 
