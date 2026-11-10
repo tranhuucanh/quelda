@@ -19,6 +19,8 @@ pub const DEFAULT_MAX_NESTING_DEPTH: u32 = 128;
 pub const DEFAULT_MAX_DECODED_BYTES_PER_STREAM: u64 = 128 << 20;
 pub const DEFAULT_MAX_DECODED_BYTES_TOTAL: u64 = 512 << 20;
 pub const DEFAULT_MAX_COMPRESSION_RATIO: u32 = 1000;
+/// Whole input; the engine holds it in memory (WASM: copied into linear memory).
+pub const DEFAULT_MAX_FILE_BYTES: u64 = 256 << 20;
 /// Large real documents have a few hundred thousand objects.
 pub const DEFAULT_MAX_OBJECTS: u64 = 1_000_000;
 /// Signed forms reach tens of incremental updates, not thousands.
@@ -32,6 +34,8 @@ pub const RATIO_MIN_OUTPUT: u64 = 1 << 20;
 /// Limits configured by policy (`limits` object).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Limits {
+    /// Size of the input. Larger input is not parsed (`LIMIT.FILE_BYTES`).
+    pub max_file_bytes: u64,
     /// Maximum number of arrays/dictionaries open at once while parsing one
     /// object. Clamped to [`HARD_MAX_NESTING_DEPTH`].
     pub max_nesting_depth: u32,
@@ -52,6 +56,7 @@ pub struct Limits {
 impl Default for Limits {
     fn default() -> Self {
         Limits {
+            max_file_bytes: DEFAULT_MAX_FILE_BYTES,
             max_nesting_depth: DEFAULT_MAX_NESTING_DEPTH,
             max_decoded_bytes_per_stream: DEFAULT_MAX_DECODED_BYTES_PER_STREAM,
             max_decoded_bytes_total: DEFAULT_MAX_DECODED_BYTES_TOTAL,

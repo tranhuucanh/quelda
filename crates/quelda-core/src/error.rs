@@ -1,6 +1,7 @@
 //! Engine issues: problems that stop the engine from inspecting (part of) the
 //! input. Any issue makes the verdict `ERROR`, `valid: false` (design §4.5).
-//! Issues are not rule findings and cannot be turned off by policy.
+//! Issues are not rule findings and cannot be turned off by policy. An
+//! invalid policy is reported the same way (`POLICY.INVALID`).
 
 use std::fmt;
 
@@ -29,6 +30,11 @@ pub enum IssueCode {
     /// Parsing would examine the input too many times over (crafted overlapping
     /// objects); see `parser::document::WORK_FACTOR`.
     LimitParseWork,
+    /// The input is larger than `max_file_bytes` (not parsed at all).
+    LimitFileBytes,
+    /// The policy is not valid JSON, has an unknown field or a value of the
+    /// wrong type, or names an unknown rule. Nothing is scanned.
+    PolicyInvalid,
 }
 
 impl IssueCode {
@@ -45,6 +51,8 @@ impl IssueCode {
             IssueCode::LimitObjects => "LIMIT.OBJECTS",
             IssueCode::LimitRevisions => "LIMIT.REVISIONS",
             IssueCode::LimitParseWork => "LIMIT.PARSE_WORK",
+            IssueCode::LimitFileBytes => "LIMIT.FILE_BYTES",
+            IssueCode::PolicyInvalid => "POLICY.INVALID",
         }
     }
 
@@ -110,6 +118,8 @@ mod tests {
         assert_eq!(IssueCode::LimitObjects.as_str(), "LIMIT.OBJECTS");
         assert_eq!(IssueCode::LimitRevisions.as_str(), "LIMIT.REVISIONS");
         assert_eq!(IssueCode::LimitParseWork.as_str(), "LIMIT.PARSE_WORK");
+        assert_eq!(IssueCode::LimitFileBytes.as_str(), "LIMIT.FILE_BYTES");
+        assert_eq!(IssueCode::PolicyInvalid.as_str(), "POLICY.INVALID");
     }
 
     #[test]
@@ -119,6 +129,8 @@ mod tests {
         assert!(IssueCode::LimitParseWork.is_limit());
         assert!(!IssueCode::EngineParse.is_limit());
         assert!(!IssueCode::EngineUndecodable.is_limit());
+        assert!(IssueCode::LimitFileBytes.is_limit());
+        assert!(!IssueCode::PolicyInvalid.is_limit());
     }
 
     #[test]

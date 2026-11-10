@@ -122,25 +122,12 @@ fn walk(dir: &Path, root: &Path, out: &mut BTreeSet<String>) -> io::Result<()> {
 
 /// Files under `dir` that the generator would write/remove/change. Empty = up to date.
 pub fn diff_dir(dir: &Path, fixtures: &[Fixture]) -> io::Result<Vec<String>> {
-    let want = expected_files(fixtures);
-    let mut have = BTreeSet::new();
-    if dir.is_dir() {
-        walk(dir, dir, &mut have)?;
-    }
-    let mut diffs = Vec::new();
-    for (path, bytes) in &want {
-        match fs::read(dir.join(path)) {
-            Ok(cur) if &cur == bytes => {}
-            Ok(_) => diffs.push(format!("changed: {path}")),
-            Err(_) => diffs.push(format!("missing: {path}")),
-        }
-    }
-    for path in have {
-        if !want.contains_key(&path) && is_generated(&path) {
-            diffs.push(format!("stale: {path}"));
-        }
-    }
-    Ok(diffs)
+    diff_files(dir, &expected_files(fixtures), is_generated)
+}
+
+/// Writes all fixtures to `dir` and removes stale generated files. Returns the file count.
+pub fn write_dir(dir: &Path, fixtures: &[Fixture]) -> io::Result<usize> {
+    write_files(dir, &expected_files(fixtures), is_generated)
 }
 
 /// Only files the generator could have produced are ever removed.
@@ -148,19 +135,67 @@ fn is_generated(path: &str) -> bool {
     path.ends_with(".pdf") || path == "manifest.json" || path == "README.md"
 }
 
-/// Writes all fixtures to `dir` and removes stale generated files. Returns the file count.
-pub fn write_dir(dir: &Path, fixtures: &[Fixture]) -> io::Result<usize> {
-    let want = expected_files(fixtures);
+/// `<workspace>/tests/conformance`.
+pub fn default_conformance_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/conformance")
+}
+
+/// Like [`diff_dir`] for the conformance cases.
+pub fn diff_conformance_dir(dir: &Path) -> io::Result<Vec<String>> {
+    diff_files(dir, &crate::conformance::files(), is_case)
+}
+
+/// Writes the conformance cases to `dir`, removing stale `*.json`.
+pub fn write_conformance_dir(dir: &Path) -> io::Result<usize> {
+    write_files(dir, &crate::conformance::files(), is_case)
+}
+
+fn is_case(path: &str) -> bool {
+    path.ends_with(".json") && !path.contains('/')
+}
+
+/// Differences between `want` and `dir` (`generated`: files this generator owns).
+fn diff_files(
+    dir: &Path,
+    want: &BTreeMap<String, Vec<u8>>,
+    generated: fn(&str) -> bool,
+) -> io::Result<Vec<String>> {
+    let mut have = BTreeSet::new();
+    if dir.is_dir() {
+        walk(dir, dir, &mut have)?;
+    }
+    let mut diffs = Vec::new();
+    for (path, bytes) in want {
+        match fs::read(dir.join(path)) {
+            Ok(cur) if &cur == bytes => {}
+            Ok(_) => diffs.push(format!("changed: {path}")),
+            Err(_) => diffs.push(format!("missing: {path}")),
+        }
+    }
+    for path in have {
+        if !want.contains_key(&path) && generated(&path) {
+            diffs.push(format!("stale: {path}"));
+        }
+    }
+    Ok(diffs)
+}
+
+/// Writes `want` under `dir` and removes stale generated files.
+fn write_files(
+    dir: &Path,
+    want: &BTreeMap<String, Vec<u8>>,
+    generated: fn(&str) -> bool,
+) -> io::Result<usize> {
     if dir.is_dir() {
         let mut have = BTreeSet::new();
         walk(dir, dir, &mut have)?;
         for path in have {
-            if !want.contains_key(&path) && is_generated(&path) {
+            if !want.contains_key(&path) && generated(&path) {
                 fs::remove_file(dir.join(&path))?;
             }
         }
     }
-    for (path, bytes) in &want {
+    for (path, bytes) in want {
         let target = dir.join(path);
         if let Some(parent) = target.parent() {
             fs::create_dir_all(parent)?;
@@ -221,6 +256,22 @@ mod tests {
             diff_dir(&dir, &fx).unwrap(),
             vec![format!("changed: {}", fx[0].path)]
         );
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn conformance_write_then_diff() {
+        let dir = std::env::temp_dir().join(format!("quelda-testkit-conf-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        assert!(!diff_conformance_dir(&dir).unwrap().is_empty());
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("old-case.json"), b"{}").unwrap();
+        fs::write(dir.join("notes.md"), b"keep").unwrap();
+        let n = write_conformance_dir(&dir).unwrap();
+        assert_eq!(n, crate::conformance::CASES.len());
+        assert!(diff_conformance_dir(&dir).unwrap().is_empty());
+        assert!(!dir.join("old-case.json").exists());
+        assert!(dir.join("notes.md").exists());
         fs::remove_dir_all(&dir).unwrap();
     }
 }

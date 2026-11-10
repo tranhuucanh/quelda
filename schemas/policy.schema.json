@@ -1,0 +1,146 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:quelda:schema:policy:1",
+  "title": "quelda policy",
+  "description": "Input of scan/scan_json (design §6). Every field is optional; {} is the balanced preset. Unknown fields, duplicate keys and null values are rejected (POLICY.INVALID). Version 1.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "preset": {
+      "enum": [
+        "strict",
+        "balanced",
+        "permissive"
+      ],
+      "description": "Base action table (default balanced)."
+    },
+    "categories": {
+      "type": "object",
+      "description": "Category overrides; beat the preset.",
+      "propertyNames": {
+        "enum": [
+          "filetype",
+          "postscript",
+          "active_content",
+          "embedded",
+          "external",
+          "forms",
+          "xml",
+          "structure",
+          "encryption",
+          "codecs",
+          "resource"
+        ]
+      },
+      "additionalProperties": {
+        "enum": [
+          "block",
+          "warn",
+          "off"
+        ]
+      }
+    },
+    "rules": {
+      "type": "object",
+      "description": "Rule overrides by ID; beat the category. Unknown IDs are rejected.",
+      "propertyNames": {
+        "$ref": "#/$defs/rule_id"
+      },
+      "additionalProperties": {
+        "enum": [
+          "block",
+          "warn",
+          "off"
+        ]
+      }
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Engine guardrails; exceeding one is an ERROR (LIMIT.*).",
+      "properties": {
+        "max_file_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615
+        },
+        "max_objects": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615
+        },
+        "max_nesting_depth": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295,
+          "description": "Clamped to 512."
+        },
+        "max_decoded_bytes_total": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615
+        },
+        "max_decoded_bytes_per_stream": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615
+        },
+        "max_compression_ratio": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "max_revisions": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        }
+      }
+    },
+    "thresholds": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Detection thresholds of some rules; exceeding one is a finding.",
+      "properties": {
+        "max_image_pixels": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615
+        },
+        "max_page_side_pt": {
+          "type": "number",
+          "minimum": 0
+        },
+        "max_pages": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615
+        },
+        "max_filter_chain": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "max_trailing_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615
+        }
+      }
+    },
+    "stop_on_first": {
+      "type": "boolean",
+      "description": "Stop at the first block finding."
+    },
+    "unsafe_allow_unlock": {
+      "type": "boolean",
+      "description": "Allow lowering locked rules (reported in the verdict)."
+    }
+  },
+  "$defs": {
+    "rule_id": {
+      "type": "string",
+      "pattern": "^[A-Z0-9]+\\.[A-Z0-9_]+$"
+    }
+  }
+}

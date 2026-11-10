@@ -90,11 +90,28 @@ pub struct Findings {
     items: Vec<Finding>,
     /// Hits per rule ID, including the ones not kept.
     counts: HashMap<&'static str, u64>,
+    /// A report from one of these rules stops the scan (`stop_on_first`).
+    stop_on: Vec<&'static str>,
+    stopped: bool,
 }
 
 impl Findings {
     pub fn new() -> Findings {
         Findings::default()
+    }
+
+    /// Findings that ask the engine to stop at the first report of any rule
+    /// in `ids` (policy `stop_on_first`: the rules whose action is `block`).
+    pub fn stopping_on(ids: Vec<&'static str>) -> Findings {
+        Findings {
+            stop_on: ids,
+            ..Findings::default()
+        }
+    }
+
+    /// A stop rule has reported: [`run_into`] calls no more hooks.
+    pub fn stopped(&self) -> bool {
+        self.stopped
     }
 
     /// Records that `rule` detected something at `site`. The rule does not
@@ -105,6 +122,9 @@ impl Findings {
         site: impl Into<Site>,
         detail: Option<String>,
     ) {
+        if self.stop_on.contains(&rule.id) {
+            self.stopped = true;
+        }
         let n = self.counts.entry(rule.id).or_insert(0);
         *n += 1;
         if *n <= MAX_FINDINGS_PER_RULE as u64 {
@@ -157,14 +177,24 @@ struct Dispatch<'r, 'c, 'a> {
 impl Visitor for Dispatch<'_, '_, '_> {
     fn dict(&mut self, dict: &Dict, loc: &Location) {
         for r in self.rules {
+            if self.out.stopped() {
+                return;
+            }
             r.check_dict(dict, loc, self.ctx, &mut self.out);
         }
     }
 
     fn content_op(&mut self, op: &ContentOp<'_>, loc: &OpLocation) {
         for r in self.rules {
+            if self.out.stopped() {
+                return;
+            }
             r.check_content_op(op, loc, self.ctx, &mut self.out);
         }
+    }
+
+    fn done(&self) -> bool {
+        self.out.stopped()
     }
 }
 
@@ -172,16 +202,23 @@ impl Visitor for Dispatch<'_, '_, '_> {
 /// (`check_dict`, `check_content_op`), then `check_document`. Which rules
 /// run is the caller's choice (policy: rules with action `off` are left out).
 pub fn run(ctx: &Ctx, rules: &[&dyn Rule]) -> Findings {
-    let mut d = Dispatch {
-        rules,
-        ctx,
-        out: Findings::new(),
-    };
+    run_into(ctx, rules, Findings::new())
+}
+
+/// [`run`] into `out`; stops calling hooks once [`Findings::stopped`].
+pub fn run_into(ctx: &Ctx, rules: &[&dyn Rule], out: Findings) -> Findings {
+    let mut d = Dispatch { rules, ctx, out };
     for r in rules {
+        if d.out.stopped() {
+            return d.out;
+        }
         r.check_file(ctx.raw(), &mut d.out);
     }
     ctx.walk(&mut d);
     for r in rules {
+        if d.out.stopped() {
+            return d.out;
+        }
         r.check_document(ctx, &mut d.out);
     }
     d.out
@@ -283,6 +320,52 @@ mod tests {
         assert!(f.is_empty());
         assert!(!f.fired("STRUCT.QUELDA_TEST"));
         assert!(run(&ctx, &[&Silent]).is_empty());
+    }
+
+    #[test]
+    fn stops_at_first_report_of_a_stop_rule() {
+        static STOP: RuleMeta = RuleMeta {
+            id: "STRUCT.QUELDA_STOP",
+            ..META
+        };
+        /// Reports `STOP` on the second dictionary it sees.
+        #[derive(Default)]
+        struct Second(AtomicUsize);
+        impl Rule for Second {
+            fn meta(&self) -> &'static RuleMeta {
+                &STOP
+            }
+            fn check_dict(&self, _: &Dict, loc: &Location, _: &Ctx, out: &mut Findings) {
+                if self.0.fetch_add(1, Ordering::Relaxed) == 1 {
+                    out.report(&STOP, loc, None);
+                }
+            }
+        }
+        let ctx = Ctx::new(SRC, Limits::default(), Thresholds::default());
+        let (p, s) = (Probe::default(), Second::default());
+        let f = run_into(&ctx, &[&s, &p], Findings::stopping_on(vec![STOP.id]));
+        assert!(f.stopped());
+        assert_eq!(f.count(STOP.id), 1);
+        // Probe saw the file and the first dict only: not the dict where
+        // STOP fired, no ops, no document.
+        assert_eq!(p.file.load(Ordering::Relaxed), 1);
+        assert_eq!(p.dicts.load(Ordering::Relaxed), 1);
+        assert_eq!(p.ops.load(Ordering::Relaxed), 0);
+        assert_eq!(p.document.load(Ordering::Relaxed), 0);
+        assert_eq!(s.0.load(Ordering::Relaxed), 2);
+
+        // A report by a non-stop rule does not stop; stop in check_file
+        // skips everything after.
+        let p = Probe::default();
+        let f = run_into(&ctx, &[&p], Findings::stopping_on(vec![STOP.id]));
+        assert!(!f.stopped());
+        assert_eq!(p.document.load(Ordering::Relaxed), 1);
+        let (p, q) = (Probe::default(), Probe::default());
+        let f = run_into(&ctx, &[&p, &q], Findings::stopping_on(vec![META.id]));
+        assert!(f.stopped());
+        assert_eq!(f.count(META.id), 1);
+        assert_eq!(q.file.load(Ordering::Relaxed), 0);
+        assert_eq!(p.dicts.load(Ordering::Relaxed), 0);
     }
 
     #[test]

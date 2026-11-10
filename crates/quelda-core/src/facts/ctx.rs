@@ -58,6 +58,10 @@ pub struct ImageFact {
 pub trait Visitor {
     fn dict(&mut self, _dict: &Dict, _loc: &Location) {}
     fn content_op(&mut self, _op: &ContentOp<'_>, _loc: &OpLocation) {}
+    /// `true`: the visitor wants nothing more; the walk stops early.
+    fn done(&self) -> bool {
+        false
+    }
 }
 
 pub struct Ctx<'a> {
@@ -286,10 +290,18 @@ impl<'a> Ctx<'a> {
     }
 
     /// The single traversal: every dictionary (file order), then every
-    /// operator of every content stream (known and speculative).
+    /// operator of every content stream (known and speculative). Stops
+    /// between dictionaries / streams once [`Visitor::done`].
     pub fn walk(&self, v: &mut dyn Visitor) {
-        visit_dicts(&self.doc.objects, |d, loc| v.dict(d, loc));
+        visit_dicts(&self.doc.objects, |d, loc| {
+            if !v.done() {
+                v.dict(d, loc);
+            }
+        });
         for (i, entry) in self.doc.objects.iter().enumerate() {
+            if v.done() {
+                return;
+            }
             let roles = self.stream_roles(i);
             if !roles.tokenized() {
                 continue;

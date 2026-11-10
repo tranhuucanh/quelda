@@ -6,5 +6,5 @@
 4. Rules only detect: read `Ctx`, call `out.report(&META, location, detail)`. No byte parsing, no policy, no `unwrap`/`panic`.
 5. New rules start with `stage = "preview"` (at most `warn`) unless the design says otherwise.
 6. Fixtures: add `bad` (incl. evasion variants: name-encoded, in-objstm, old-revision, nested-dict) and `good` (near-miss) cases to `quelda-testkit`, run `cargo run -p quelda-testkit --bin gen-fixtures`.
-7. Add the rule to `quelda_testkit::rules::RULES` (spec mirror). Unit-test code rules in their file.
+7. Add the rule to `quelda_testkit::rules::RULES` (spec mirror). If its preset actions differ from its category's, add it to `crates/quelda-core/src/policy/presets.rs` too. Unit-test code rules in their file.
 8. `cargo test --workspace`: the fixture harness fails if `rules/<ID>/bad/` or `good/` is missing or wrong.

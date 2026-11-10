@@ -26,7 +26,7 @@ cargo deny check licenses
 Test PDFs are generated, not committed. Generate them before running tests that need fixtures:
 
 ```bash
-cargo run -p quelda-testkit --bin gen-fixtures   # writes tests/fixtures/
+cargo run -p quelda-testkit --bin gen-fixtures   # writes tests/fixtures/ and tests/conformance/
 ```
 
 | Path | Contents |
