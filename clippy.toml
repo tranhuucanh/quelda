@@ -1,0 +1,4 @@
+# quelda-core denies unwrap/expect/panic on input paths; tests may use them.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true

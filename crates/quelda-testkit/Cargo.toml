@@ -1,0 +1,16 @@
+[package]
+name = "quelda-testkit"
+description = "Dev-only: deterministic PDF builder and fixture generator for quelda tests"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+publish = false
+
+# Must NOT depend on quelda-core: the writer stays independent of the parser.
+[dependencies]
+
+[[bin]]
+name = "gen-fixtures"
+path = "src/bin/gen-fixtures.rs"

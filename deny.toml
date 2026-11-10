@@ -1,0 +1,33 @@
+# cargo-deny config. License policy: design §11 / ADR #9.
+# Run: cargo deny check licenses   (CI runs all checks)
+
+[licenses]
+# Permissive licenses only. Never add GPL/AGPL/LGPL/MPL here
+# (Ghostscript, MuPDF, Poppler, ClamAV must never be linked).
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "Zlib",
+    "ISC",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+]
+confidence-threshold = 0.93
+# The allowlist is policy, not inventory: don't warn about licenses no dependency uses yet.
+unused-allowed-license = "allow"
+
+[licenses.private]
+# Unpublished workspace crates (quelda-testkit) are not distributed.
+ignore = true
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

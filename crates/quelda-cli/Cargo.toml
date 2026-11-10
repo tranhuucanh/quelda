@@ -1,0 +1,15 @@
+[package]
+name = "quelda-cli"
+description = "quelda command-line scanner (thin wrapper around quelda-core)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "quelda"
+path = "src/main.rs"
+
+[dependencies]
+quelda-core.workspace = true
