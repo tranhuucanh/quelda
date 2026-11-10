@@ -8,6 +8,7 @@
 //! rules see each definition once. Different definitions of the same id are
 //! all kept.
 
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 
 use super::linear_scan::object_candidates;
@@ -20,7 +21,7 @@ use super::parse::{
 use super::structure::Structure;
 use super::xref::{EntryKind, XrefKind, XrefProblem, XrefSection, parse_stream_rows, parse_table};
 use crate::error::{EngineIssue, IssueCode};
-use crate::filters::{DecodeOutcome, decode};
+use crate::filters::{DecodeOutcome, FilterKind, decode};
 use crate::limits::{Budget, Limits};
 
 /// Parsing may examine at most `WORK_FACTOR` × (file size + decoded object
@@ -162,6 +163,9 @@ pub struct Facts {
     /// Streams (indices into `objects`) whose indirect `/Length` has several
     /// definitions giving different valid lengths; the longest is used.
     pub ambiguous_lengths: Vec<usize>,
+    /// Object and xref streams (indices into `objects`) whose data ends
+    /// before the end marker of `filter`; parsed as far as it decodes.
+    pub truncated_streams: Vec<(usize, FilterKind)>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -284,7 +288,7 @@ struct Builder<'a, 'b> {
     issued: HashSet<IssueCode>,
 }
 
-impl Builder<'_, '_> {
+impl<'a> Builder<'a, '_> {
     fn issue(&mut self, code: IssueCode, offset: Option<usize>, msg: impl Into<String>) {
         self.doc.issues.push(EngineIssue::new(code, offset, msg));
     }
@@ -556,6 +560,12 @@ impl Builder<'_, '_> {
                 problems = p;
                 entries
             }
+            DecodeOutcome::Truncated { data, filter } => {
+                self.doc.facts.truncated_streams.push((i, filter));
+                let (entries, p) = parse_stream_rows(&s.dict, &data);
+                problems = p;
+                entries
+            }
             DecodeOutcome::Partial { data, .. } => {
                 let (entries, p) = parse_stream_rows(&s.dict, &data);
                 problems.push(XrefProblem::Undecodable);
@@ -587,7 +597,7 @@ impl Builder<'_, '_> {
     }
 
     /// Decodes a stream, resolving an indirect `/Filter` / `/DecodeParms`.
-    fn decode_stream(&mut self, s: &PdfStream) -> DecodeOutcome {
+    fn decode_stream(&mut self, s: &PdfStream) -> DecodeOutcome<'a> {
         let Some(raw) = self.src.get(s.data.clone()) else {
             return DecodeOutcome::Invalid("stream data out of range");
         };
@@ -734,18 +744,19 @@ impl Builder<'_, '_> {
             .get_all("Extends")
             .filter_map(PdfObject::as_reference)
             .collect();
-        let data = match self.decode_stream(&s) {
+        let data: Cow<[u8]> = match self.decode_stream(&s) {
             DecodeOutcome::Complete(d) => d,
+            DecodeOutcome::Truncated { data, filter } => {
+                self.doc.facts.truncated_streams.push((c, filter));
+                Cow::Owned(data)
+            }
             DecodeOutcome::Partial { data, filter } => {
                 self.issue(
                     IssueCode::EngineUndecodable,
                     offset,
-                    format!(
-                        "object stream {id}: {} data corrupt or truncated",
-                        filter.name()
-                    ),
+                    format!("object stream {id}: {} data corrupt", filter.name()),
                 );
-                data
+                Cow::Owned(data)
             }
             DecodeOutcome::Limit(code) => {
                 self.issue(code, offset, format!("object stream {id}: decode limit"));

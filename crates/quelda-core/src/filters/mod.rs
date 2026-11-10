@@ -133,11 +133,17 @@ pub fn parse_chain<'a>(
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum DecodeOutcome {
-    /// Every filter decoded its whole input.
-    Complete(Vec<u8>),
-    /// `filter` (the first that failed) hit corrupt or truncated data; `data`
-    /// is what the chain produced anyway.
+pub enum DecodeOutcome<'a> {
+    /// Every filter decoded its whole input. Unfiltered data is borrowed
+    /// from the input, not copied.
+    Complete(Cow<'a, [u8]>),
+    /// `filter` (the first that was cut short) ran out of input before its
+    /// end marker; `data` is everything it decoded up to there, which is
+    /// what readers render. Only Flate reports this (other filters treat a
+    /// missing end marker as a clean end).
+    Truncated { data: Vec<u8>, filter: FilterKind },
+    /// `filter` (the first that failed) hit corrupt data; `data` is what the
+    /// chain produced anyway.
     Partial { data: Vec<u8>, filter: FilterKind },
     /// The chain contains a filter v0.1 never decodes (image codec, Crypt).
     NotInspected(FilterKind),
@@ -149,19 +155,48 @@ pub enum DecodeOutcome {
     Limit(IssueCode),
 }
 
-impl DecodeOutcome {
+impl DecodeOutcome<'_> {
     /// Decoded bytes, if any were produced.
     pub fn data(&self) -> Option<&[u8]> {
         match self {
-            DecodeOutcome::Complete(d) | DecodeOutcome::Partial { data: d, .. } => Some(d),
+            DecodeOutcome::Complete(d) => Some(d),
+            DecodeOutcome::Truncated { data: d, .. } | DecodeOutcome::Partial { data: d, .. } => {
+                Some(d)
+            }
             _ => None,
         }
+    }
+
+    /// The same outcome, owning its data.
+    pub fn into_owned(self) -> DecodeOutcome<'static> {
+        match self {
+            DecodeOutcome::Complete(d) => DecodeOutcome::Complete(Cow::Owned(d.into_owned())),
+            DecodeOutcome::Truncated { data, filter } => DecodeOutcome::Truncated { data, filter },
+            DecodeOutcome::Partial { data, filter } => DecodeOutcome::Partial { data, filter },
+            DecodeOutcome::NotInspected(k) => DecodeOutcome::NotInspected(k),
+            DecodeOutcome::Unknown(n) => DecodeOutcome::Unknown(n),
+            DecodeOutcome::Invalid(m) => DecodeOutcome::Invalid(m),
+            DecodeOutcome::Limit(c) => DecodeOutcome::Limit(c),
+        }
+    }
+
+    /// The whole data was decoded: complete, or truncated (every byte up to
+    /// the end of the input, as readers see it).
+    pub fn is_usable(&self) -> bool {
+        matches!(
+            self,
+            DecodeOutcome::Complete(_) | DecodeOutcome::Truncated { .. }
+        )
     }
 }
 
 /// Decodes the raw data of `stream` (located in `src`) with its own
 /// `/Filter` and `/DecodeParms`.
-pub fn decode_stream(src: &[u8], stream: &PdfStream, budget: &mut Budget) -> DecodeOutcome {
+pub fn decode_stream<'a>(
+    src: &'a [u8],
+    stream: &PdfStream,
+    budget: &mut Budget,
+) -> DecodeOutcome<'a> {
     let Some(raw) = src.get(stream.data.clone()) else {
         return DecodeOutcome::Invalid("stream data out of range");
     };
@@ -175,12 +210,15 @@ pub fn decode_stream(src: &[u8], stream: &PdfStream, budget: &mut Budget) -> Dec
 
 /// Decodes `raw` through the chain given by `filter` / `parms`. The decoded
 /// size is charged to `budget` (once, on success or partial success).
-pub fn decode(
-    raw: &[u8],
+/// Unfiltered data is returned as is and charged nothing: decode limits
+/// stop decompression bombs, and raw data is already bounded by the file
+/// size limit.
+pub fn decode<'a>(
+    raw: &'a [u8],
     filter: Option<&PdfObject>,
     parms: Option<&PdfObject>,
     budget: &mut Budget,
-) -> DecodeOutcome {
+) -> DecodeOutcome<'a> {
     let chain = match parse_chain(filter, parms) {
         Ok(c) => c,
         Err(msg) => return DecodeOutcome::Invalid(msg),
@@ -198,17 +236,27 @@ pub fn decode(
     {
         return DecodeOutcome::NotInspected(k);
     }
+    if chain.is_empty() {
+        return DecodeOutcome::Complete(Cow::Borrowed(raw));
+    }
     let cap = budget.cap_for(raw.len() as u64);
     let mut data: Cow<[u8]> = Cow::Borrowed(raw);
-    let mut failed: Option<FilterKind> = None;
+    let mut corrupt: Option<FilterKind> = None;
+    let mut truncated: Option<FilterKind> = None;
     for e in &chain {
         let Some(kind) = e.kind else {
             return DecodeOutcome::Unknown(e.name.clone());
         };
         match run_stage(kind, &data, e.parms, cap) {
-            Ok((out, complete)) => {
-                if !complete && failed.is_none() {
-                    failed = Some(kind);
+            Ok((out, end)) => {
+                match end {
+                    End::Complete => {}
+                    End::Truncated => {
+                        truncated.get_or_insert(kind);
+                    }
+                    End::Corrupt => {
+                        corrupt.get_or_insert(kind);
+                    }
                 }
                 data = Cow::Owned(out);
             }
@@ -216,15 +264,33 @@ pub fn decode(
             Err(StageError::Invalid(msg)) => return DecodeOutcome::Invalid(msg),
         }
     }
-    // Unfiltered streams count against the budget like decoded ones.
-    if data.len() as u64 > cap.bytes {
-        return DecodeOutcome::Limit(cap.code);
-    }
     let data = data.into_owned();
     budget.charge(data.len() as u64);
-    match failed {
-        None => DecodeOutcome::Complete(data),
-        Some(filter) => DecodeOutcome::Partial { data, filter },
+    match (corrupt, truncated) {
+        (Some(filter), _) => DecodeOutcome::Partial { data, filter },
+        (None, Some(filter)) => DecodeOutcome::Truncated { data, filter },
+        (None, None) => DecodeOutcome::Complete(Cow::Owned(data)),
+    }
+}
+
+/// How a filter's input ended.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum End {
+    /// End marker reached, or a clean end of input.
+    Complete,
+    /// Input ran out before the end marker; everything before it decoded.
+    Truncated,
+    /// Invalid data.
+    Corrupt,
+}
+
+impl From<bool> for End {
+    fn from(complete: bool) -> End {
+        if complete {
+            End::Complete
+        } else {
+            End::Corrupt
+        }
     }
 }
 
@@ -240,31 +306,31 @@ impl From<LimitHit> for StageError {
     }
 }
 
-/// One filter (+ predictor). Returns the output and whether the input was
-/// decoded completely.
+/// One filter (+ predictor). Returns the output and how the input ended.
 fn run_stage(
     kind: FilterKind,
     input: &[u8],
     parms: Option<&Dict>,
     cap: Cap,
-) -> Result<(Vec<u8>, bool), StageError> {
+) -> Result<(Vec<u8>, End), StageError> {
     let mut sink = Sink::new(cap);
-    let complete = match kind {
+    let end = match kind {
         FilterKind::Flate => flate::decode(input, &mut sink)?,
-        FilterKind::Lzw => lzw::decode(input, lzw::early_change(parms)?, &mut sink)?,
-        FilterKind::AsciiHex => asciihex::decode(input, &mut sink)?,
-        FilterKind::Ascii85 => ascii85::decode(input, &mut sink)?,
-        FilterKind::RunLength => runlength::decode(input, &mut sink)?,
+        FilterKind::Lzw => lzw::decode(input, lzw::early_change(parms)?, &mut sink)?.into(),
+        FilterKind::AsciiHex => asciihex::decode(input, &mut sink)?.into(),
+        FilterKind::Ascii85 => ascii85::decode(input, &mut sink)?.into(),
+        FilterKind::RunLength => runlength::decode(input, &mut sink)?.into(),
         _ => return Err(StageError::Invalid("filter is not decodable")),
     };
     let out = sink.into_inner();
     if matches!(kind, FilterKind::Flate | FilterKind::Lzw) {
         if let Some(p) = predictor::Params::from_dict(parms).map_err(StageError::Invalid)? {
+            // A partial last row has no single decoding: corrupt.
             let (out, rows_ok) = p.apply(&out);
-            return Ok((out, complete && rows_ok));
+            return Ok((out, if rows_ok { end } else { End::Corrupt }));
         }
     }
-    Ok((out, complete))
+    Ok((out, end))
 }
 
 /// A decode limit was reached.
@@ -341,7 +407,7 @@ mod tests {
         ))
     }
 
-    fn run(raw: &[u8], filter: &PdfObject, parms: Option<&PdfObject>) -> DecodeOutcome {
+    fn run<'a>(raw: &'a [u8], filter: &PdfObject, parms: Option<&PdfObject>) -> DecodeOutcome<'a> {
         decode(
             raw,
             Some(filter),
@@ -397,7 +463,7 @@ mod tests {
             let raw = f.encode(TEXT);
             assert_eq!(
                 run(&raw, &name(f.name()), None),
-                DecodeOutcome::Complete(TEXT.to_vec()),
+                DecodeOutcome::Complete(TEXT.to_vec().into()),
                 "{}",
                 f.name()
             );
@@ -411,19 +477,19 @@ mod tests {
         let filter = names(&["ASCII85Decode", "ASCIIHexDecode", "FlateDecode"]);
         assert_eq!(
             run(&raw, &filter, None),
-            DecodeOutcome::Complete(TEXT.to_vec())
+            DecodeOutcome::Complete(TEXT.to_vec().into())
         );
         let raw = encode(TEXT, &[Filter::Ascii85, Filter::Flate]);
         let filter = names(&["A85", "Fl"]);
         assert_eq!(
             run(&raw, &filter, None),
-            DecodeOutcome::Complete(TEXT.to_vec())
+            DecodeOutcome::Complete(TEXT.to_vec().into())
         );
         let raw = encode(TEXT, &[Filter::Flate, Filter::Flate]);
         let filter = names(&["FlateDecode", "FlateDecode"]);
         assert_eq!(
             run(&raw, &filter, None),
-            DecodeOutcome::Complete(TEXT.to_vec())
+            DecodeOutcome::Complete(TEXT.to_vec().into())
         );
     }
 
@@ -432,12 +498,17 @@ mod tests {
         let mut b = Budget::new(&Limits::default());
         assert_eq!(
             decode(b"abc", None, None, &mut b),
-            DecodeOutcome::Complete(b"abc".to_vec())
+            DecodeOutcome::Complete(b"abc".to_vec().into())
         );
-        assert_eq!(b.used(), 3);
+        // Unfiltered data is borrowed, not copied, and not charged.
+        assert!(matches!(
+            decode(b"abc", None, None, &mut b),
+            DecodeOutcome::Complete(Cow::Borrowed(_))
+        ));
+        assert_eq!(b.used(), 0);
         assert_eq!(
             decode(b"abc", Some(&PdfObject::Null), None, &mut b),
-            DecodeOutcome::Complete(b"abc".to_vec())
+            DecodeOutcome::Complete(b"abc".to_vec().into())
         );
         assert_eq!(run(b"abc", &names(&[]), None).data(), Some(&b"abc"[..]));
     }
@@ -514,7 +585,7 @@ mod tests {
         let parms = dict(&[("Predictor", 12), ("Columns", 3)]);
         assert_eq!(
             run(&raw, &name("FlateDecode"), Some(&parms)),
-            DecodeOutcome::Complete(vec![1, 2, 3, 2, 3, 4])
+            DecodeOutcome::Complete(vec![1, 2, 3, 2, 3, 4].into())
         );
         let bad = dict(&[("Predictor", 7)]);
         assert!(matches!(
@@ -525,7 +596,7 @@ mod tests {
         let raw = Filter::AsciiHex.encode(&encoded);
         assert_eq!(
             run(&raw, &name("AHx"), Some(&parms)),
-            DecodeOutcome::Complete(encoded.to_vec())
+            DecodeOutcome::Complete(encoded.to_vec().into())
         );
     }
 
@@ -534,13 +605,42 @@ mod tests {
         let raw = Filter::Flate.encode(&TEXT.repeat(50));
         let cut = &raw[..raw.len() / 2];
         match run(cut, &name("FlateDecode"), None) {
-            DecodeOutcome::Partial { data, filter } => {
+            DecodeOutcome::Truncated { data, filter } => {
                 assert_eq!(filter, FilterKind::Flate);
                 assert!(!data.is_empty());
                 assert!(TEXT.repeat(50).starts_with(&data));
             }
             other => panic!("{other:?}"),
         }
+        // Corrupt Flate (stored block with a bad length check).
+        assert!(matches!(
+            run(b"\x78\x9c\x00\x05\x00\x00\x00", &name("FlateDecode"), None),
+            DecodeOutcome::Partial {
+                filter: FilterKind::Flate,
+                ..
+            }
+        ));
+        // Truncated then corrupt in a chain: corrupt wins.
+        let hex_of_cut: Vec<u8> = cut
+            .iter()
+            .flat_map(|b| format!("{b:02X}").into_bytes())
+            .chain(*b"ZZ")
+            .collect();
+        assert!(matches!(
+            run(&hex_of_cut, &names(&["AHx", "Fl"]), None),
+            DecodeOutcome::Partial {
+                filter: FilterKind::AsciiHex,
+                ..
+            }
+        ));
+        let hex_of_cut = &hex_of_cut[..hex_of_cut.len() - 2];
+        assert!(matches!(
+            run(hex_of_cut, &names(&["AHx", "Fl"]), None),
+            DecodeOutcome::Truncated {
+                filter: FilterKind::Flate,
+                ..
+            }
+        ));
         // Corrupt hex ("A B C" then junk) feeding RunLength: the first
         // failing filter is reported, the chain still runs on what decoded.
         // RL reads 0x41 = copy 66 bytes, only "BC" left (also partial).
@@ -586,11 +686,12 @@ mod tests {
             DecodeOutcome::Limit(IssueCode::LimitStreamDecodedBytes)
         );
         assert_eq!(b.used(), 0);
-        // Unfiltered data counts too.
-        assert_eq!(
+        // Unfiltered data is not decoded: no limit applies (ADR #26).
+        assert!(matches!(
             decode(&[0; 4001], None, None, &mut b),
-            DecodeOutcome::Limit(IssueCode::LimitStreamDecodedBytes)
-        );
+            DecodeOutcome::Complete(_)
+        ));
+        assert_eq!(b.used(), 0);
         let mut b = small_budget(5000, 1 << 30, 1_000_000);
         assert!(matches!(
             decode(&raw, Some(&name("Fl")), None, &mut b),
@@ -647,7 +748,7 @@ mod tests {
         let mut b = Budget::new(&Limits::default());
         assert_eq!(
             decode_stream(&src, &stream, &mut b),
-            DecodeOutcome::Complete(TEXT.to_vec())
+            DecodeOutcome::Complete(TEXT.to_vec().into())
         );
         let bad = PdfStream {
             data: 2..src.len() + 1,

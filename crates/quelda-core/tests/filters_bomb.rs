@@ -39,7 +39,7 @@ static ALLOC: Counting = Counting;
 
 /// Decodes the page content (object 4) of `path`; returns the outcome,
 /// heap growth at peak, and time taken.
-fn decode_content(path: &str, limits: &Limits) -> (DecodeOutcome, usize, Duration) {
+fn decode_content(path: &str, limits: &Limits) -> (DecodeOutcome<'static>, usize, Duration) {
     let f = fixture(path);
     let content = object(&f.bytes, 4);
     let stream = content.object.as_stream().unwrap();
@@ -47,7 +47,7 @@ fn decode_content(path: &str, limits: &Limits) -> (DecodeOutcome, usize, Duratio
     let base = CURRENT.load(Ordering::SeqCst);
     PEAK.store(base, Ordering::SeqCst);
     let start = Instant::now();
-    let outcome = decode_stream(&f.bytes, stream, &mut budget);
+    let outcome = decode_stream(&f.bytes, stream, &mut budget).into_owned();
     let elapsed = start.elapsed();
     let peak = PEAK.load(Ordering::SeqCst) - base;
     eprintln!("{path}: {outcome:?}, peak {} KiB, {elapsed:?}", peak / 1024);

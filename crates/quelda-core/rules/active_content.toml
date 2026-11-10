@@ -26,18 +26,6 @@ description = "A dictionary with a /JS key (JavaScript action or rendition scrip
 match = { dict = { any = [ { key = "JS" }, { key = "S", name = "JavaScript" }, { key = "JavaScript" } ] } }
 
 [[rule]]
-id = "ACTIVE.OPEN_ACTION"
-category = "active_content"
-severity = "medium"
-default_action = "block"
-locked = false
-stage = "stable"
-since = "0.1.0"
-message = "Document runs an action when opened"
-description = "A dictionary with an /OpenAction key (ISO 32000-2 §7.7.2): a destination or action performed automatically when the document is opened, often used to start JavaScript or other actions without user interaction."
-match = { dict = { key = "OpenAction" } }
-
-[[rule]]
 id = "ACTIVE.ADDITIONAL_ACTIONS"
 category = "active_content"
 severity = "medium"

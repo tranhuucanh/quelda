@@ -108,12 +108,11 @@ await scanner.scan(file, {
 
 Defaults are strict on purpose (safety first). If a rule blocks files your users legitimately
 upload, relax **that rule** rather than the whole category or preset. For example,
-`ACTIVE.OPEN_ACTION` blocks files that do something when opened; many PDF tools add an
-`/OpenAction` that only jumps to a page. After checking your own files, you can turn it into a
-warning:
+`EMBED.EMBEDDED_FILE` blocks files that carry attachments; some e-books and reports ship
+sample files that way. After checking your own files, you can turn it into a warning:
 
 ```ts
-{ rules: { 'ACTIVE.OPEN_ACTION': 'warn' } }   // still reported in verdict.warnings
+{ rules: { 'EMBED.EMBEDDED_FILE': 'warn' } }   // still reported in verdict.warnings
 ```
 
 Locked rules (`locked: true` in `listRules()`: PostScript, Launch actions, files that are not

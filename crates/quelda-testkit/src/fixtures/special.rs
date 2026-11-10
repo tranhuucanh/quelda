@@ -2,7 +2,7 @@
 //! and XML rules, rule-specific evasion variants, and every rule's near-miss
 //! `good/` files.
 
-use super::dict_cases::XFA_PLAIN;
+use super::dict_cases::{TYPE4_BAD, XFA_PLAIN};
 use super::filetype::{self, FOREIGN, NOT_PDF, POLYGLOT, PS_MAGIC};
 use super::{BASE_CONTENT, Doc, Fixture, LINK_TO_10, bad, good};
 use crate::builder::{PdfBuilder, Xref, raw_stream_body};
@@ -1516,7 +1516,7 @@ fn batch_a_variants() -> Vec<Fixture> {
                 b.stream(
                     10,
                     "/FunctionType 4.0 /Domain [0 1] /Range [0 1]",
-                    b"{ dup }",
+                    TYPE4_BAD,
                     &[],
                 );
                 b.build()

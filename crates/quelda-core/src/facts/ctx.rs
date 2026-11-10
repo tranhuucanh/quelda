@@ -16,17 +16,25 @@ use super::page_tree::{PageTree, page_tree};
 use super::streams::{StreamRoles, classify, filter_names, resolved_chain};
 use super::visitor::{Location, visit_dicts};
 use crate::error::{EngineIssue, IssueCode};
-use crate::filters::{DecodeOutcome, decode};
+use crate::filters::{DecodeOutcome, FilterKind, decode};
 use crate::limits::{Budget, Limits, Thresholds};
 use crate::parser::document::{Facts, ObjectEntry, Revision, Trailer};
 use crate::parser::structure::Structure;
 use crate::parser::{Dict, Document, Name, PdfObject};
 
-/// Decoded data of a stream (complete, or partial for a speculative stream).
+/// Decoded data of a stream (complete, truncated, or partial for a
+/// speculative stream).
 #[derive(Clone, Debug)]
-pub struct StreamData(Rc<DecodeOutcome>);
+pub struct StreamData<'a>(Rc<DecodeOutcome<'a>>);
 
-impl Deref for StreamData {
+impl StreamData<'_> {
+    /// Complete or truncated: every byte a reader would see.
+    pub fn is_usable(&self) -> bool {
+        self.0.is_usable()
+    }
+}
+
+impl Deref for StreamData<'_> {
     type Target = [u8];
     fn deref(&self) -> &[u8] {
         self.0.data().unwrap_or_default()
@@ -74,7 +82,7 @@ pub struct Ctx<'a> {
     images: Vec<ImageFact>,
     headers: Vec<usize>,
     budget: RefCell<Budget>,
-    cache: RefCell<HashMap<usize, Rc<DecodeOutcome>>>,
+    cache: RefCell<HashMap<usize, Rc<DecodeOutcome<'a>>>>,
     issues: RefCell<Vec<EngineIssue>>,
     /// Limit codes already reported (each once per scan).
     limits_hit: RefCell<HashSet<IssueCode>>,
@@ -201,7 +209,7 @@ impl<'a> Ctx<'a> {
 
     /// Decoded data of the stream whose dictionary is at `loc` (`None`: not
     /// a stream dictionary, or not decodable).
-    pub fn decoded_stream(&self, loc: &Location) -> Option<StreamData> {
+    pub fn decoded_stream(&self, loc: &Location) -> Option<StreamData<'a>> {
         if !loc.is_object() {
             return None;
         }
@@ -211,7 +219,7 @@ impl<'a> Ctx<'a> {
     }
 
     /// Decodes stream `objects[object]` once (cached) and records issues.
-    pub fn decode(&self, object: usize) -> Option<Rc<DecodeOutcome>> {
+    pub fn decode(&self, object: usize) -> Option<Rc<DecodeOutcome<'a>>> {
         if let Some(o) = self.cache.borrow().get(&object) {
             return Some(Rc::clone(o));
         }
@@ -247,11 +255,13 @@ impl<'a> Ctx<'a> {
                     self.issue(*code, offset, format!("stream {}: decode limit", entry.id));
                 }
             }
-            DecodeOutcome::Complete(_) => {}
+            // Truncated data is inspected as far as it decodes (what readers
+            // render, ADR #26); `STRUCT.TRUNCATED_STREAM` reports it.
+            DecodeOutcome::Complete(_) | DecodeOutcome::Truncated { .. } => {}
             other if roles.must_inspect() => {
                 let why = match other {
                     DecodeOutcome::Partial { filter, .. } => {
-                        format!("{} data corrupt or truncated", filter.name())
+                        format!("{} data corrupt", filter.name())
                     }
                     DecodeOutcome::NotInspected(k) => format!("filter {} not decoded", k.name()),
                     DecodeOutcome::Unknown(n) => format!("unknown filter {n:?}"),
@@ -269,6 +279,28 @@ impl<'a> Ctx<'a> {
         let outcome = Rc::new(outcome);
         self.cache.borrow_mut().insert(object, Rc::clone(&outcome));
         Some(outcome)
+    }
+
+    /// Streams whose data ends before the end marker of a filter (the
+    /// filter named): object and xref streams found by the parser, and every
+    /// stream that is inspected or tokenized (decoded here if not yet).
+    /// Sorted by object index.
+    pub fn truncated_streams(&self) -> Vec<(usize, FilterKind)> {
+        let mut v = self.doc.facts.truncated_streams.clone();
+        for i in 0..self.roles.len() {
+            let roles = self.roles[i];
+            if !(roles.must_inspect() || roles.tokenized()) {
+                continue;
+            }
+            if let Some(o) = self.decode(i) {
+                if let DecodeOutcome::Truncated { filter, .. } = *o {
+                    v.push((i, filter));
+                }
+            }
+        }
+        v.sort_unstable_by_key(|&(i, _)| i);
+        v.dedup_by_key(|&mut (i, _)| i);
+        v
     }
 
     /// Decoded bytes charged to the budget so far.
@@ -474,7 +506,7 @@ mod tests {
     fn xml_and_script_must_decode() {
         let src = b"1 0 obj << /Metadata 2 0 R /JS 3 0 R >> endobj\n\
             2 0 obj << /Length 2 /Filter /DCTDecode >> stream\nxx\nendstream endobj\n\
-            3 0 obj << /Length 2 /Filter /FlateDecode >> stream\nxx\nendstream endobj";
+            3 0 obj << /Length 2 /Filter /FlateDecode >> stream\n\xff\xff\nendstream endobj";
         let c = ctx(src);
         let codes: Vec<_> = c.issues().iter().map(|i| i.message.clone()).collect();
         assert_eq!(codes.len(), 2, "{codes:?}");
@@ -493,15 +525,74 @@ mod tests {
     #[test]
     fn decode_limit_reported_once() {
         let limits = Limits {
-            max_decoded_bytes_total: 3,
+            max_decoded_bytes_total: 2,
             ..Limits::default()
         };
-        let src = b"2 0 obj << /Length 4 >> stream\nq PS\nendstream endobj\n3 0 obj << /Length 4 >> stream\nq PS\nendstream endobj";
+        let src = b"2 0 obj << /Length 5 /Filter /AHx >> stream\n71205>\nendstream endobj\n3 0 obj << /Length 5 /Filter /AHx >> stream\n71205>\nendstream endobj";
         let c = Ctx::new(src, limits, Thresholds::default());
         c.walk(&mut Collect::default());
         let issues = c.issues();
         assert_eq!(issues.len(), 1);
         assert_eq!(issues[0].code, IssueCode::LimitDecodedBytes);
+    }
+
+    fn with_stream(dict: &str, data: &[u8]) -> Vec<u8> {
+        [
+            format!("1 0 obj << /Contents 2 0 R /Metadata 3 0 R >> endobj\n2 0 obj << {dict} /Length {} >> stream\n", data.len()).as_bytes(),
+            data,
+            b"\nendstream endobj\n3 0 obj << /Length 4 >> stream\n<x/>\nendstream endobj",
+        ]
+        .concat()
+    }
+
+    #[test]
+    fn truncated_content_is_inspected() {
+        let content: Vec<u8> = (0..400)
+            .flat_map(|i| format!("q 1 0 0 1 {i} {} cm Q ", i * 7 % 13).into_bytes())
+            .collect();
+        let z = miniz_oxide::deflate::compress_to_vec_zlib(&content, 6);
+        let cut = &z[..z.len() * 2 / 3];
+        let src = with_stream("/Filter /FlateDecode", cut);
+        let c = ctx(&src);
+        assert!(c.issues().is_empty(), "{:?}", c.issues());
+        let data = c.decoded_stream(&Location::of(1, &c.objects()[1])).unwrap();
+        assert!(data.is_usable() && data.len() > 100);
+        assert!(content.starts_with(&data));
+        assert!(matches!(
+            *c.decode(1).unwrap(),
+            DecodeOutcome::Truncated { .. }
+        ));
+        // Corrupt data in a content stream is still an issue.
+        let src = with_stream(
+            "/Filter /FlateDecode",
+            &[&[0x78, 0x9C, 0xFF][..], &[0; 8]].concat(),
+        );
+        assert_eq!(ctx(&src).issues()[0].code, IssueCode::EngineUndecodable);
+    }
+
+    #[test]
+    fn unfiltered_streams_are_not_limited_or_copied() {
+        let limits = Limits {
+            max_decoded_bytes_per_stream: 10,
+            max_decoded_bytes_total: 10,
+            ..Limits::default()
+        };
+        let data = b"q Q ".repeat(100);
+        let src = with_stream("", &data);
+        let c = Ctx::new(&src, limits.clone(), Thresholds::default());
+        c.walk(&mut Collect::default());
+        assert!(c.issues().is_empty(), "{:?}", c.issues());
+        assert_eq!(c.decoded_bytes(), 0);
+        let d = c.decoded_stream(&Location::of(1, &c.objects()[1])).unwrap();
+        // The very bytes of the input.
+        assert_eq!(
+            d.as_ptr(),
+            src[src.windows(4).position(|w| w == b"q Q ").unwrap()..].as_ptr()
+        );
+        // Filtered data still counts.
+        let src = with_stream("/Filter /AHx", &b"20".repeat(11));
+        let c = Ctx::new(&src, limits, Thresholds::default());
+        assert_eq!(c.issues()[0].code, IssueCode::LimitStreamDecodedBytes);
     }
 
     #[test]

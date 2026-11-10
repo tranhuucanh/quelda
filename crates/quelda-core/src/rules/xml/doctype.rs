@@ -2,7 +2,8 @@
 //! ENTITY.
 
 use crate::facts::{Ctx, Location};
-use crate::parser::Dict;
+use crate::parser::{Dict, PdfObject};
+use crate::rules::values::values;
 use crate::rules::{Action, Category, Findings, Rule, RuleMeta, Severity, Stage};
 
 pub struct Doctype;
@@ -17,7 +18,8 @@ static META: RuleMeta = RuleMeta {
     since: "0.1.0",
     message: "Embedded XML declares a DOCTYPE or ENTITY (XXE risk)",
     description: "A decoded XML stream (XMP metadata, XFA packet) — or a stream of unknown \
-        role, which a reader could still parse as XML — contains `<!DOCTYPE` or `<!ENTITY` \
+        role, which a reader could still parse as XML, or an XFA packet written as a string — \
+        contains `<!DOCTYPE` or `<!ENTITY` \
         (ASCII case-insensitive, in UTF-8, UTF-16 or UTF-32). Document type declarations \
         enable XML external entity (XXE) and entity expansion (billion laughs) attacks on \
         the XML parser of the reader or of server-side tools.",
@@ -80,7 +82,24 @@ impl Rule for Doctype {
         &META
     }
 
-    fn check_dict(&self, _: &Dict, loc: &Location, ctx: &Ctx, out: &mut Findings) {
+    fn check_dict(&self, dict: &Dict, loc: &Location, ctx: &Ctx, out: &mut Findings) {
+        // XFA packets written as strings (`/XFA (…)` or `[(name) (…) …]`,
+        // directly or through references).
+        for v in values(ctx, dict, "XFA") {
+            let items = match v {
+                PdfObject::Array(items) => items.as_slice(),
+                v => std::slice::from_ref(v),
+            };
+            let found = items
+                .iter()
+                .flat_map(|i| ctx.resolve(i))
+                .filter_map(PdfObject::as_string)
+                .find_map(find_declaration);
+            if let Some((marker, enc)) = found {
+                out.report(&META, loc, Some(format!("{marker} in XFA string ({enc})")));
+                break;
+            }
+        }
         // A stream object's own dictionary.
         if !loc.is_object()
             || ctx
@@ -211,13 +230,40 @@ mod tests {
 
     #[test]
     fn unknown_role_stream_counts() {
-        // `/XFA 3 0 R` → array → stream: roles do not follow the array.
+        let src = [&b"1 0 obj << /Q 2 0 R >> endobj\n"[..], &stream(2, "", DTD)].concat();
+        assert_eq!(
+            details(&src),
+            vec![Some("<!DOCTYPE in unknown-role stream (UTF-8)".into())]
+        );
+        // `/XFA 3 0 R` → array → stream: the role follows the array.
         let src = [
             &b"1 0 obj << /XFA 3 0 R >> endobj\n3 0 obj [(template) 2 0 R] endobj\n"[..],
             &stream(2, "", DTD),
         ]
         .concat();
-        assert_eq!(details(&src).len(), 1);
+        assert_eq!(
+            details(&src),
+            vec![Some("<!DOCTYPE in XML stream (UTF-8)".into())]
+        );
+    }
+
+    #[test]
+    fn xfa_string_packets() {
+        let dtd = String::from_utf8_lossy(DTD).replace('"', "'");
+        for src in [
+            format!("1 0 obj << /XFA [(template) ({dtd})] >> endobj\n"),
+            format!("1 0 obj << /XFA ({dtd}) >> endobj\n"),
+            format!("1 0 obj << /XFA 2 0 R >> endobj\n2 0 obj [(template) 3 0 R] endobj\n3 0 obj ({dtd}) endobj\n"),
+            format!("1 0 obj << /XFA 2 0 R >> endobj\n2 0 obj [(a) (b)] endobj\n2 0 obj [(template) ({dtd})] endobj\n"),
+        ] {
+            assert_eq!(
+                details(src.as_bytes()),
+                vec![Some("<!DOCTYPE in XFA string (UTF-8)".into())],
+                "{src}"
+            );
+        }
+        let clean = b"1 0 obj << /XFA [(template) (<template/>)] >> endobj\n";
+        assert!(details(clean).is_empty());
     }
 
     #[test]

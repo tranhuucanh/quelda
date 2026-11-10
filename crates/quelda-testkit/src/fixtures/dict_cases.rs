@@ -34,6 +34,7 @@ const OBJSTM_CHAIN: [Filter; 3] = [Filter::Ascii85, Filter::AsciiHex, Filter::Fl
 const INDIRECT_VALUES: &[(&str, &str, &str)] = &[
     ("POSTSCRIPT.XOBJECT", "Subtype", "/PS"),
     ("POSTSCRIPT.TYPE4_FUNCTION", "FunctionType", "4"),
+    ("ACTIVE.OPEN_ACTION", "OpenAction", "<< /S /Thread /D 0 >>"),
     ("ACTIVE.JAVASCRIPT", "S", "/JavaScript"),
     ("ACTIVE.LAUNCH", "S", "/Launch"),
     ("ACTIVE.OTHER_ACTIONS", "S", "/Named"),
@@ -148,11 +149,11 @@ pub(crate) fn cases() -> Vec<DictCase> {
             "POSTSCRIPT.TYPE4_FUNCTION",
             stream_obj(
                 "/FunctionType 4 /Domain [0 1] /Range [0 1]",
-                b"{ dup }",
+                TYPE4_BAD,
                 Orphan,
             ),
             &["FunctionType"],
-            "Type 4 (PostScript calculator) function",
+            "Type 4 function whose program uses a string (outside the spec allowlist)",
         ),
         case(
             "ACTIVE.JAVASCRIPT",
@@ -171,9 +172,9 @@ pub(crate) fn cases() -> Vec<DictCase> {
         ),
         case(
             "ACTIVE.OPEN_ACTION",
-            Payload::Catalog("/OpenAction [3 0 R /Fit]".to_string()),
-            &["OpenAction"],
-            "OpenAction with a harmless GoTo destination",
+            Payload::Catalog("/OpenAction << /S /Thread /D 0 >>".to_string()),
+            &["OpenAction", "Thread"],
+            "OpenAction running a (harmless) Thread action: not a plain GoTo",
         ),
         case(
             "ACTIVE.ADDITIONAL_ACTIONS",
@@ -329,6 +330,9 @@ pub(crate) fn cases() -> Vec<DictCase> {
     v.push(type1);
     v
 }
+
+/// A Type 4 program outside the allowlist (a string), harmless anyway.
+pub(crate) const TYPE4_BAD: &[u8] = b"{ (quelda-test) pop }";
 
 pub(crate) const XFA_PLAIN: &[u8] =
     b"<xdp:xdp xmlns:xdp=\"http://ns.adobe.com/xdp/\"><template xmlns=\"http://www.xfa.org/schema/xfa-template/3.3/\"/></xdp:xdp>";
@@ -547,13 +551,16 @@ mod tests {
         let (pdf, _) = build_variant(&c, "plain");
         assert!(contains(
             &pdf,
-            b"<< /Type /Catalog /Pages 2 0 R /OpenAction [3 0 R /Fit] >>"
+            b"<< /Type /Catalog /Pages 2 0 R /OpenAction << /S /Thread /D 0 >> >>"
         ));
         let (pdf, _) = build_variant(&c, "nested-dict");
         assert!(contains(
             &pdf,
-            b"/QueldaNest << /L2 << /OpenAction [3 0 R /Fit] >> >>"
+            b"/QueldaNest << /L2 << /OpenAction << /S /Thread /D 0 >> >> >>"
         ));
+        let (pdf, _) = build_variant(&c, INDIRECT);
+        assert!(contains(&pdf, b"/OpenAction 30 0 R"));
+        assert!(contains(&pdf, b"30 0 obj\n<< /S /Thread /D 0 >>\nendobj"));
         let (pdf, _) = build_variant(&c, "in-objstm");
         assert!(!contains(&pdf, b"/OpenAction"));
     }
@@ -576,7 +583,7 @@ mod tests {
             assert!(cases().iter().any(|c| c.rule == *rule), "{rule}");
         }
         for c in cases() {
-            if c.rule == "ACTIVE.OPEN_ACTION" || c.rule == "FORMS.ACROFORM" {
+            if c.rule == "FORMS.ACROFORM" {
                 assert!(c.indirect.is_none());
             }
         }
