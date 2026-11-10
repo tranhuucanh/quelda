@@ -23,8 +23,9 @@ jobs:
         run: cargo fmt --all -- --check
       - name: clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
-      # Fixtures (tests/) are not committed (ADR #12). Once Step 2 lands, add:
-      #   cargo run -p quelda-testkit --bin gen-fixtures
+      # Fixtures (tests/) are not committed (ADR #12): generate them first.
+      - name: generate fixtures
+        run: cargo run -p quelda-testkit --bin gen-fixtures
       - name: test
         run: cargo test --workspace
       - name: build wasm

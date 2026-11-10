@@ -1,0 +1,509 @@
+//! Rules that match a dictionary key/value. Each case is expanded into the five
+//! standard evasion variants: plain, name-encoded, in-objstm, old-revision, nested-dict.
+
+use super::{Doc, Fixture, LINK_TO_10, bad};
+use crate::builder::{PdfBuilder, Xref};
+use crate::filters::Filter;
+use crate::names::encode_names_in;
+
+pub(crate) const VARIANTS: &[&str] = &[
+    "plain",
+    "name-encoded",
+    "in-objstm",
+    "old-revision",
+    "nested-dict",
+];
+
+/// Where a standalone payload object (number 10) is referenced from.
+#[derive(Clone, Copy)]
+pub(crate) enum Attach {
+    /// Not referenced (only union scan sees it).
+    Orphan,
+    /// `/A` of a link annotation on the page.
+    AnnotA,
+    /// The payload is itself an annotation in the page's `/Annots`.
+    PageAnnot,
+    /// Page resource `/XObject << /Q1 10 0 R >>`.
+    XObject,
+}
+
+pub(crate) enum Payload {
+    /// Object 10: `dict`, plus stream data when `stream` is set.
+    Obj {
+        dict: String,
+        stream: Option<Vec<u8>>,
+        attach: Attach,
+    },
+    /// Entries inserted into the catalog dict (object 1).
+    Catalog(String),
+    /// Entries inserted into the page dict (object 3).
+    Page(String),
+}
+
+pub(crate) struct DictCase {
+    pub rule: &'static str,
+    pub payload: Payload,
+    /// Names rewritten by the `name-encoded` variant.
+    pub names: &'static [&'static str],
+    /// Helper objects the payload references (`(num, body)`), e.g. a FontFile stream.
+    pub helpers: Vec<(u32, Vec<u8>)>,
+    /// Other rules that the payload itself also triggers.
+    pub also: &'static [&'static str],
+    pub note: &'static str,
+}
+
+fn obj(dict: &str, attach: Attach) -> Payload {
+    Payload::Obj {
+        dict: dict.to_string(),
+        stream: None,
+        attach,
+    }
+}
+
+fn stream_obj(dict: &str, data: &[u8], attach: Attach) -> Payload {
+    Payload::Obj {
+        dict: dict.to_string(),
+        stream: Some(data.to_vec()),
+        attach,
+    }
+}
+
+fn case(
+    rule: &'static str,
+    payload: Payload,
+    names: &'static [&'static str],
+    note: &'static str,
+) -> DictCase {
+    DictCase {
+        rule,
+        payload,
+        names,
+        helpers: Vec::new(),
+        also: &[],
+        note,
+    }
+}
+
+fn helper_stream(dict: &str, data: &[u8]) -> Vec<u8> {
+    crate::builder::raw_stream_body(dict, data)
+}
+
+pub(crate) fn cases() -> Vec<DictCase> {
+    use Attach::*;
+    let mut v = vec![
+        case(
+            "POSTSCRIPT.XOBJECT",
+            stream_obj(
+                "/Type /XObject /Subtype /PS",
+                b"% quelda-test\nshowpage\n",
+                XObject,
+            ),
+            &["PS"],
+            "PostScript XObject (harmless `showpage`)",
+        ),
+        case(
+            "POSTSCRIPT.TYPE4_FUNCTION",
+            stream_obj(
+                "/FunctionType 4 /Domain [0 1] /Range [0 1]",
+                b"{ dup }",
+                Orphan,
+            ),
+            &["FunctionType"],
+            "Type 4 (PostScript calculator) function",
+        ),
+        case(
+            "ACTIVE.JAVASCRIPT",
+            obj(
+                "<< /S /JavaScript /JS (app.alert('quelda-test')) >>",
+                AnnotA,
+            ),
+            &["JavaScript", "JS"],
+            "JavaScript action on a link annotation",
+        ),
+        case(
+            "ACTIVE.LAUNCH",
+            obj("<< /S /Launch /F (quelda-test.txt) >>", AnnotA),
+            &["Launch"],
+            "Launch action (points at a harmless file name)",
+        ),
+        case(
+            "ACTIVE.OPEN_ACTION",
+            Payload::Catalog("/OpenAction [3 0 R /Fit]".to_string()),
+            &["OpenAction"],
+            "OpenAction with a harmless GoTo destination",
+        ),
+        case(
+            "ACTIVE.ADDITIONAL_ACTIONS",
+            Payload::Page("/AA << /O << /S /GoTo /D [3 0 R /Fit] >> >>".to_string()),
+            &["AA"],
+            "Page additional-actions (harmless GoTo)",
+        ),
+        case(
+            "ACTIVE.OTHER_ACTIONS",
+            obj("<< /S /Named /N /NextPage >>", AnnotA),
+            &["Named"],
+            "Named action",
+        ),
+        case(
+            "EMBED.EMBEDDED_FILE",
+            stream_obj("/Type /EmbeddedFile", b"quelda-test\n", Orphan),
+            &["EmbeddedFile"],
+            "Embedded file stream",
+        ),
+        case(
+            "EMBED.FILE_ATTACHMENT",
+            obj(
+                "<< /Type /Annot /Subtype /FileAttachment /Rect [0 0 10 10] /FS << /Type /Filespec /F (quelda-test.txt) >> >>",
+                PageAnnot,
+            ),
+            &["FileAttachment"],
+            "File attachment annotation",
+        ),
+        case(
+            "EMBED.RICH_MEDIA",
+            obj(
+                "<< /Type /Annot /Subtype /RichMedia /Rect [0 0 10 10] >>",
+                PageAnnot,
+            ),
+            &["RichMedia"],
+            "RichMedia annotation",
+        ),
+        case(
+            "EMBED.PORTFOLIO",
+            Payload::Catalog("/Collection << /Type /Collection /View /D >>".to_string()),
+            &["Collection"],
+            "PDF Portfolio (`/Collection` in the catalog)",
+        ),
+        case(
+            "EXTERNAL.URI",
+            obj(
+                "<< /S /URI /URI (https://example.invalid/quelda-test) >>",
+                AnnotA,
+            ),
+            &["URI"],
+            "URI action to a reserved .invalid domain",
+        ),
+        case(
+            "EXTERNAL.REMOTE_GOTO",
+            obj("<< /S /GoToR /F (quelda-test.pdf) /D [0 /Fit] >>", AnnotA),
+            &["GoToR"],
+            "GoToR action",
+        ),
+        case(
+            "EXTERNAL.SUBMIT_FORM",
+            obj(
+                "<< /S /SubmitForm /F (https://example.invalid/quelda-test) >>",
+                AnnotA,
+            ),
+            &["SubmitForm"],
+            "SubmitForm action",
+        ),
+        case(
+            "EXTERNAL.IMPORT_DATA",
+            obj("<< /S /ImportData /F (quelda-test.fdf) >>", AnnotA),
+            &["ImportData"],
+            "ImportData action",
+        ),
+        case(
+            "EXTERNAL.URL_FILESPEC",
+            obj(
+                "<< /Type /Filespec /FS /URL /F (https://example.invalid/quelda-test) >>",
+                Orphan,
+            ),
+            &["URL"],
+            "URL file specification",
+        ),
+        case(
+            "FORMS.ACROFORM",
+            Payload::Catalog("/AcroForm << /Fields [] >>".to_string()),
+            &["AcroForm"],
+            "Empty AcroForm",
+        ),
+        case(
+            "CODEC.JBIG2",
+            stream_obj(
+                "/Type /XObject /Subtype /Image /Width 8 /Height 8 /ColorSpace /DeviceGray /BitsPerComponent 1 /Filter /JBIG2Decode",
+                b"quelda-test jbig2 bytes (not decoded)",
+                XObject,
+            ),
+            &["JBIG2Decode"],
+            "Image declaring the JBIG2Decode filter (data is not real JBIG2)",
+        ),
+        case(
+            "CODEC.JPX",
+            stream_obj(
+                "/Type /XObject /Subtype /Image /Width 8 /Height 8 /Filter /JPXDecode",
+                b"quelda-test jpx bytes (not decoded)",
+                XObject,
+            ),
+            &["JPXDecode"],
+            "Image declaring the JPXDecode filter (data is not real JPEG 2000)",
+        ),
+        case(
+            "RESOURCE.IMAGE_DIMENSIONS",
+            stream_obj(
+                "/Type /XObject /Subtype /Image /Width 100000 /Height 100000 /ColorSpace /DeviceGray /BitsPerComponent 8",
+                &[0u8; 16],
+                XObject,
+            ),
+            &["Width"],
+            "Pixel bomb: declares 100000x100000 (1e10 px) with 16 bytes of data",
+        ),
+        case(
+            "RESOURCE.PAGE_SIZE",
+            Payload::Page("/MediaBox [0 0 100000 100000]".to_string()),
+            &["MediaBox"],
+            "Page bomb: 100000 pt square page (~35 m)",
+        ),
+    ];
+
+    let mut xfa = case(
+        "FORMS.XFA",
+        Payload::Catalog("/AcroForm << /Fields [] /XFA 20 0 R >>".to_string()),
+        &["XFA"],
+        "AcroForm with an XFA stream",
+    );
+    xfa.helpers.push((20, helper_stream("", XFA_PLAIN)));
+    xfa.also = &["FORMS.ACROFORM"];
+    v.push(xfa);
+
+    let mut type1 = case(
+        "CODEC.TYPE1_FONT",
+        obj(
+            "<< /Type /FontDescriptor /FontName /QueldaTest /Flags 32 /FontBBox [0 0 1000 1000] /ItalicAngle 0 /Ascent 800 /Descent -200 /CapHeight 700 /StemV 80 /FontFile 20 0 R >>",
+            Orphan,
+        ),
+        &["FontFile"],
+        "Font descriptor with an embedded Type 1 program (fake bytes)",
+    );
+    type1.helpers.push((
+        20,
+        helper_stream(
+            "/Length1 40 /Length2 0 /Length3 0",
+            b"%!PS-AdobeFont-1.0: QueldaTest\n% quelda-test\n",
+        ),
+    ));
+    v.push(type1);
+    v
+}
+
+pub(crate) const XFA_PLAIN: &[u8] =
+    b"<xdp:xdp xmlns:xdp=\"http://ns.adobe.com/xdp/\"><template xmlns=\"http://www.xfa.org/schema/xfa-template/3.3/\"/></xdp:xdp>";
+
+/// Applies a payload to `doc` and returns the builder, ready for more objects.
+/// `keep_stream: false` writes a stream payload as a bare dict (for ObjStm).
+fn plain_builder(c: &DictCase, text: &str, mut doc: Doc, keep_stream: bool) -> PdfBuilder {
+    match &c.payload {
+        Payload::Obj { stream, attach, .. } => {
+            match attach {
+                Attach::Orphan => {}
+                Attach::AnnotA => doc.annots.push(6),
+                Attach::PageAnnot => doc.annots.push(10),
+                Attach::XObject => doc.xobjects.push(("Q1", 10)),
+            }
+            let mut b = doc.builder();
+            if matches!(attach, Attach::AnnotA) {
+                b.object(6, LINK_TO_10);
+            }
+            match stream {
+                Some(data) if keep_stream => b.stream_raw(10, text, data),
+                _ => b.object(10, as_dict(text, false)),
+            };
+            b
+        }
+        Payload::Catalog(_) => {
+            doc.catalog_extra = text.to_string();
+            doc.builder()
+        }
+        Payload::Page(_) => {
+            doc.page_extra = text.to_string();
+            doc.builder()
+        }
+    }
+}
+
+fn payload_text(c: &DictCase) -> &str {
+    match &c.payload {
+        Payload::Obj { dict, .. } => dict,
+        Payload::Catalog(e) | Payload::Page(e) => e,
+    }
+}
+
+/// Payload as a direct dict (stream data dropped), for nesting and ObjStm.
+fn as_dict(text: &str, is_entry: bool) -> String {
+    let t = text.trim();
+    if is_entry || t.starts_with("<<") {
+        t.to_string()
+    } else {
+        format!("<< {t} >>")
+    }
+}
+
+fn add_helpers(b: &mut PdfBuilder, c: &DictCase) {
+    for (n, body) in &c.helpers {
+        b.object(*n, body);
+    }
+}
+
+/// Builds one variant; returns the bytes and the extra rules the variant itself triggers.
+pub(crate) fn build_variant(c: &DictCase, variant: &str) -> (Vec<u8>, Vec<&'static str>) {
+    let text = payload_text(c);
+    let is_entry = matches!(c.payload, Payload::Catalog(_) | Payload::Page(_));
+    match variant {
+        "plain" | "name-encoded" => {
+            let text = if variant == "name-encoded" {
+                encode_names_in(text, c.names)
+            } else {
+                text.to_string()
+            };
+            let mut b = plain_builder(c, &text, Doc::new(), true);
+            add_helpers(&mut b, c);
+            (b.build(), vec![])
+        }
+        "in-objstm" => {
+            let mut doc = Doc::new();
+            doc.version = "1.5";
+            let mut b = plain_builder(c, text, doc, false);
+            let member = match c.payload {
+                Payload::Obj { .. } => 10,
+                Payload::Catalog(_) => 1,
+                Payload::Page(_) => 3,
+            };
+            b.objstm(9, &[member], &[Filter::Flate]).xref(Xref::Stream);
+            add_helpers(&mut b, c);
+            (b.build(), vec![])
+        }
+        "old-revision" => {
+            let mut b = plain_builder(c, text, Doc::new(), true);
+            add_helpers(&mut b, c);
+            b.revision();
+            match &c.payload {
+                Payload::Obj { .. } => {
+                    b.object(10, "<< /Type /QueldaNeutralized >>");
+                }
+                Payload::Catalog(_) => {
+                    b.object(1, Doc::new().catalog_body());
+                }
+                Payload::Page(_) => {
+                    b.object(3, Doc::new().page_body());
+                }
+            }
+            (b.build(), vec!["STRUCT.INCREMENTAL_UPDATE"])
+        }
+        "nested-dict" => {
+            let mut doc = Doc::new();
+            doc.page_extra = if is_entry {
+                format!("/QueldaNest << /L2 << {} >> >>", text.trim())
+            } else {
+                format!("/QueldaNest << /L2 << /L3 {} >> >>", as_dict(text, false))
+            };
+            let mut b = doc.builder();
+            add_helpers(&mut b, c);
+            (b.build(), vec![])
+        }
+        other => panic!("unknown dict variant {other}"),
+    }
+}
+
+pub(crate) fn all() -> Vec<Fixture> {
+    let mut out = Vec::new();
+    for c in cases() {
+        for &variant in VARIANTS {
+            let (bytes, extra) = build_variant(&c, variant);
+            let mut also: Vec<&'static str> = c.also.to_vec();
+            also.extend(extra);
+            let note = format!("{} — variant `{variant}`", c.note);
+            out.push(bad(c.rule, variant, bytes, &also, &note));
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn contains(hay: &[u8], needle: &[u8]) -> bool {
+        hay.windows(needle.len()).any(|w| w == needle)
+    }
+
+    fn launch() -> DictCase {
+        cases()
+            .into_iter()
+            .find(|c| c.rule == "ACTIVE.LAUNCH")
+            .unwrap()
+    }
+
+    #[test]
+    fn plain_attaches_and_contains_payload() {
+        let (pdf, extra) = build_variant(&launch(), "plain");
+        assert!(extra.is_empty());
+        assert!(contains(&pdf, b"/S /Launch"));
+        assert!(contains(&pdf, b"/Annots [6 0 R]"));
+        assert!(contains(&pdf, b"/A 10 0 R"));
+    }
+
+    #[test]
+    fn name_encoded_hides_plain_name() {
+        let (pdf, _) = build_variant(&launch(), "name-encoded");
+        assert!(!contains(&pdf, b"/Launch"));
+        assert!(contains(&pdf, b"/#4C#61#75#6E#63#68"));
+    }
+
+    #[test]
+    fn objstm_variant_compresses_payload() {
+        let (pdf, _) = build_variant(&launch(), "in-objstm");
+        assert!(
+            !contains(&pdf, b"/Launch"),
+            "payload must only exist inside the Flate ObjStm"
+        );
+        assert!(contains(&pdf, b"/Type /ObjStm"));
+        assert!(contains(&pdf, b"/Type /XRef"));
+    }
+
+    #[test]
+    fn old_revision_neutralizes_in_update() {
+        let (pdf, extra) = build_variant(&launch(), "old-revision");
+        assert_eq!(extra, vec!["STRUCT.INCREMENTAL_UPDATE"]);
+        assert!(contains(&pdf, b"/S /Launch"));
+        assert!(contains(&pdf, b"/QueldaNeutralized"));
+        assert_eq!(pdf.windows(5).filter(|w| w == b"%%EOF").count(), 2);
+    }
+
+    #[test]
+    fn nested_dict_has_no_payload_object() {
+        let (pdf, _) = build_variant(&launch(), "nested-dict");
+        assert!(contains(&pdf, b"/QueldaNest << /L2 << /L3 << /S /Launch"));
+        assert!(!contains(&pdf, b"10 0 obj"));
+    }
+
+    #[test]
+    fn catalog_entry_variants() {
+        let c = cases()
+            .into_iter()
+            .find(|c| c.rule == "ACTIVE.OPEN_ACTION")
+            .unwrap();
+        let (pdf, _) = build_variant(&c, "plain");
+        assert!(contains(
+            &pdf,
+            b"<< /Type /Catalog /Pages 2 0 R /OpenAction [3 0 R /Fit] >>"
+        ));
+        let (pdf, _) = build_variant(&c, "nested-dict");
+        assert!(contains(
+            &pdf,
+            b"/QueldaNest << /L2 << /OpenAction [3 0 R /Fit] >> >>"
+        ));
+        let (pdf, _) = build_variant(&c, "in-objstm");
+        assert!(!contains(&pdf, b"/OpenAction"));
+    }
+
+    #[test]
+    fn every_case_builds_every_variant() {
+        for c in cases() {
+            for v in VARIANTS {
+                let (pdf, _) = build_variant(&c, v);
+                assert!(pdf.starts_with(b"%PDF-1."), "{} {v}", c.rule);
+            }
+        }
+    }
+}
