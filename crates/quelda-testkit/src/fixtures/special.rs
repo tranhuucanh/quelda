@@ -809,7 +809,32 @@ fn extra_rule_variants() -> Vec<Fixture> {
         b.build()
     };
     let goto_e = action("<< /S /GoToE /T << /R /C /N (quelda-test) >> >>");
+    // The value of `/S` is an indirect object (ADR #19: declarative rules
+    // follow one level of references, every definition).
+    let indirect_s = |name: &str| {
+        let mut d = Doc::new();
+        d.annots.push(6);
+        let mut b = d.builder();
+        b.object(6, LINK_TO_10)
+            .object(10, "<< /S 11 0 R /F (quelda-test.txt) >>")
+            .object(11, format!("/{name}"));
+        b.build()
+    };
     vec![
+        bad(
+            "ACTIVE.LAUNCH",
+            "indirect-value",
+            indirect_s("Launch"),
+            &[],
+            "Launch action whose /S is an indirect name object",
+        ),
+        good(
+            "ACTIVE.LAUNCH",
+            "indirect-goto",
+            indirect_s("GoTo"),
+            &[],
+            "GoTo action whose /S is an indirect name object",
+        ),
         bad(
             "EMBED.EMBEDDED_FILE",
             "names-tree",

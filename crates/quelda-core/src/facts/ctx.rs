@@ -185,6 +185,16 @@ impl<'a> Ctx<'a> {
         }
     }
 
+    /// The values `o` stands for: `o` itself, or, if it is an indirect
+    /// reference, every definition of the referenced object (one level; union).
+    pub fn resolve<'s>(&'s self, o: &'s PdfObject) -> impl Iterator<Item = &'s PdfObject> + 's {
+        let defs = o
+            .as_reference()
+            .map(|r| self.doc.definitions(r).map(|e| &e.object));
+        let direct = if defs.is_none() { Some(o) } else { None };
+        direct.into_iter().chain(defs.into_iter().flatten())
+    }
+
     /// Decoded data of the stream whose dictionary is at `loc` (`None`: not
     /// a stream dictionary, or not decodable).
     pub fn decoded_stream(&self, loc: &Location) -> Option<StreamData> {
@@ -505,6 +515,20 @@ mod tests {
         let c = ctx(src);
         let last = src.windows(5).rposition(|w| w == b"%PDF-").unwrap();
         assert_eq!(c.header_lines(), &[0, last]);
+    }
+
+    #[test]
+    fn resolve_follows_one_level() {
+        use crate::parser::ObjRef;
+        let src = b"1 0 obj /A endobj\n1 0 obj /B endobj\n2 0 obj 1 0 R endobj";
+        let c = ctx(src);
+        let all = |o: &PdfObject| -> Vec<PdfObject> { c.resolve(o).cloned().collect() };
+        let name = |n: &str| PdfObject::Name(Name::from(n));
+        let r1 = PdfObject::Ref(ObjRef::new(1, 0));
+        assert_eq!(all(&r1), vec![name("A"), name("B")]);
+        assert_eq!(all(&PdfObject::Ref(ObjRef::new(2, 0))), vec![r1]);
+        assert!(all(&PdfObject::Ref(ObjRef::new(9, 0))).is_empty());
+        assert_eq!(all(&PdfObject::Int(3)), vec![PdfObject::Int(3)]);
     }
 
     #[test]

@@ -1,0 +1,14 @@
+# Declarative rules, category `active_content` (design §5.4, §5.7).
+# Names are matched after `#xx` decoding; indirect values are followed one level.
+
+[[rule]]
+id = "ACTIVE.LAUNCH"
+category = "active_content"
+severity = "critical"
+default_action = "block"
+locked = true
+stage = "stable"
+since = "0.1.0"
+message = "Launch action can execute external programs"
+description = "Action dictionary with /S /Launch (ISO 32000-2 §12.6.4.6): opens or runs a file or application on the reader's system."
+match = { dict = { key = "S", name = "Launch" } }
