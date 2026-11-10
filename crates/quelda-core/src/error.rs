@@ -19,6 +19,16 @@ pub enum IssueCode {
     LimitCompressionRatio,
     /// More filters on one stream than the engine will run.
     LimitFilterChain,
+    /// A stream that must be inspected (e.g. an object stream) cannot be
+    /// decoded: unknown or unsupported filter, corrupt or truncated data.
+    EngineUndecodable,
+    /// More objects (union of all definitions) than `max_objects`.
+    LimitObjects,
+    /// More cross-reference sections (revisions) than `max_revisions`.
+    LimitRevisions,
+    /// Parsing would examine the input too many times over (crafted overlapping
+    /// objects); see `parser::document::WORK_FACTOR`.
+    LimitParseWork,
 }
 
 impl IssueCode {
@@ -31,6 +41,10 @@ impl IssueCode {
             IssueCode::LimitStreamDecodedBytes => "LIMIT.STREAM_DECODED_BYTES",
             IssueCode::LimitCompressionRatio => "LIMIT.COMPRESSION_RATIO",
             IssueCode::LimitFilterChain => "LIMIT.FILTER_CHAIN",
+            IssueCode::EngineUndecodable => "ENGINE.UNDECODABLE",
+            IssueCode::LimitObjects => "LIMIT.OBJECTS",
+            IssueCode::LimitRevisions => "LIMIT.REVISIONS",
+            IssueCode::LimitParseWork => "LIMIT.PARSE_WORK",
         }
     }
 
@@ -92,13 +106,19 @@ mod tests {
             "LIMIT.COMPRESSION_RATIO"
         );
         assert_eq!(IssueCode::LimitFilterChain.as_str(), "LIMIT.FILTER_CHAIN");
+        assert_eq!(IssueCode::EngineUndecodable.as_str(), "ENGINE.UNDECODABLE");
+        assert_eq!(IssueCode::LimitObjects.as_str(), "LIMIT.OBJECTS");
+        assert_eq!(IssueCode::LimitRevisions.as_str(), "LIMIT.REVISIONS");
+        assert_eq!(IssueCode::LimitParseWork.as_str(), "LIMIT.PARSE_WORK");
     }
 
     #[test]
     fn limit_codes_are_flagged() {
         assert!(IssueCode::LimitNestingDepth.is_limit());
         assert!(IssueCode::LimitCompressionRatio.is_limit());
+        assert!(IssueCode::LimitParseWork.is_limit());
         assert!(!IssueCode::EngineParse.is_limit());
+        assert!(!IssueCode::EngineUndecodable.is_limit());
     }
 
     #[test]

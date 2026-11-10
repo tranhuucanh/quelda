@@ -18,6 +18,10 @@ pub const DEFAULT_MAX_NESTING_DEPTH: u32 = 128;
 pub const DEFAULT_MAX_DECODED_BYTES_PER_STREAM: u64 = 128 << 20;
 pub const DEFAULT_MAX_DECODED_BYTES_TOTAL: u64 = 512 << 20;
 pub const DEFAULT_MAX_COMPRESSION_RATIO: u32 = 1000;
+/// Large real documents have a few hundred thousand objects.
+pub const DEFAULT_MAX_OBJECTS: u64 = 1_000_000;
+/// Signed forms reach tens of incremental updates, not thousands.
+pub const DEFAULT_MAX_REVISIONS: u32 = 1000;
 
 /// The compression ratio limit only applies once a stream decodes to more
 /// than this: small streams (XMP padding, tiny content) legitimately reach
@@ -36,6 +40,12 @@ pub struct Limits {
     pub max_decoded_bytes_total: u64,
     /// Decoded size / raw size of one stream (above [`RATIO_MIN_OUTPUT`]).
     pub max_compression_ratio: u32,
+    /// Object definitions in the union set (every revision, linear scan,
+    /// object streams).
+    pub max_objects: u64,
+    /// Cross-reference sections (one per revision; a hybrid file's xref
+    /// stream counts with its table).
+    pub max_revisions: u32,
 }
 
 impl Default for Limits {
@@ -45,6 +55,8 @@ impl Default for Limits {
             max_decoded_bytes_per_stream: DEFAULT_MAX_DECODED_BYTES_PER_STREAM,
             max_decoded_bytes_total: DEFAULT_MAX_DECODED_BYTES_TOTAL,
             max_compression_ratio: DEFAULT_MAX_COMPRESSION_RATIO,
+            max_objects: DEFAULT_MAX_OBJECTS,
+            max_revisions: DEFAULT_MAX_REVISIONS,
         }
     }
 }

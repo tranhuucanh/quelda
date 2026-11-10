@@ -127,18 +127,22 @@ fn hex_val(b: u8) -> Option<u8> {
 pub struct Lexer<'a> {
     data: &'a [u8],
     pos: usize,
+    /// Furthest position any token reached (rewinds do not lower it).
+    furthest: usize,
 }
 
 impl<'a> Lexer<'a> {
     pub fn new(data: &'a [u8]) -> Self {
-        Lexer { data, pos: 0 }
+        Lexer::at(data, 0)
     }
 
     /// Lexer starting at `pos` (clamped to the end of `data`).
     pub fn at(data: &'a [u8], pos: usize) -> Self {
+        let pos = pos.min(data.len());
         Lexer {
             data,
-            pos: pos.min(data.len()),
+            pos,
+            furthest: pos,
         }
     }
 
@@ -150,8 +154,15 @@ impl<'a> Lexer<'a> {
         self.pos
     }
 
+    /// Furthest offset read so far: how much input lexing has examined,
+    /// including bytes consumed by failed tokens and later rewound.
+    pub fn furthest(&self) -> usize {
+        self.furthest.max(self.pos)
+    }
+
     /// Moves to `pos` (clamped to the end of `data`).
     pub fn set_pos(&mut self, pos: usize) {
+        self.furthest = self.furthest();
         self.pos = pos.min(self.data.len());
     }
 
