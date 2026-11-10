@@ -9,7 +9,7 @@ processor.
 - [Scan a file](#scan-a-file)
 - [Exit codes](#exit-codes)
 - [The verdict](#the-verdict)
-- [Policy](#policy)
+- [Policy](#policy) (details: [policy.md](policy.md), [rules.md](rules.md))
 - [Call it from your backend](#call-it-from-your-backend)
 - [Other commands](#other-commands)
 
@@ -160,8 +160,19 @@ One JSON object on one line, shown formatted here ([`schemas/verdict.schema.json
 
 ## Policy
 
-A policy is optional JSON ([`schemas/policy.schema.json`](../schemas/policy.schema.json)). Three
-levels; the most specific wins: **preset → categories → rules**.
+A policy chooses how strict the scan is. Full guide: **[policy.md](policy.md)** (how it works,
+the presets, recipes, every field and limit, engine errors). What each rule catches:
+**[rules.md](rules.md)**.
+
+The short version:
+
+- **Every rule always runs.** A policy starts from a preset (`strict`, `balanced` — the default
+  — or `permissive`) and changes the action (`block`, `warn`, `off`) of the categories and rules
+  you name; everything else keeps its preset action.
+- The most specific setting wins: preset → `categories` → `rules`.
+- Locked rules (PostScript, Launch, files that are not PDF, …) always block.
+- The policy is parsed strictly: a typo, an unknown field or a rule ID this engine does not know
+  is `ERROR` (`POLICY.INVALID`, exit code 2), never silently ignored.
 
 ```json
 {
@@ -172,15 +183,8 @@ levels; the most specific wins: **preset → categories → rules**.
 }
 ```
 
-- Actions: `block`, `warn`, `off`. Presets: `strict`, `balanced` (default), `permissive`.
-- Defaults are strict on purpose. If a rule blocks files your users legitimately upload, relax
-  **that rule** (as above), not the whole category or preset.
-- Locked rules (`quelda rules --format text` marks them `[locked]`: PostScript, Launch actions,
-  files that are not PDF, …) stay `block` whatever the policy says, unless it also sets
-  `"unsafe_allow_unlock": true`. Do not do that for untrusted files.
-- Parsing is strict: unknown fields, duplicate keys, wrong types, unknown categories and **rule
-  IDs this engine does not know** make the verdict `ERROR` (`POLICY.INVALID`, exit code 2)
-  instead of being ignored, because a silently ignored typo could switch a rule off.
+Pass it with `--policy policy.json` or `--policy-json '…'`; `--preset` and `--stop-on-first`
+override the policy's `preset` and `stop_on_first`.
 
 ### Keep every engine on the same rule set
 

@@ -97,6 +97,13 @@ twice.
 
 ## Policy
 
+quelda has 40 rules in 11 categories, and **every rule always runs**: a policy starts from a
+preset and changes the action (`block`, `warn`, `off`) of the categories and rules you name;
+everything else keeps its preset action. What each rule catches and its action in each preset:
+[rules.md](https://github.com/tranhuucanh/quelda/blob/main/docs/rules.md). Full policy guide
+(presets, recipes, limits, engine errors):
+[policy.md](https://github.com/tranhuucanh/quelda/blob/main/docs/policy.md).
+
 Three levels; the most specific wins: **preset → categories → rules**
 ([`policy.schema.json`](https://github.com/tranhuucanh/quelda/blob/main/schemas/policy.schema.json)).
 
