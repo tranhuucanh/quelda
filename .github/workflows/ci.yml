@@ -28,8 +28,38 @@ jobs:
         run: cargo run -p quelda-testkit --bin gen-fixtures
       - name: test
         run: cargo test --workspace
+      - name: script tests
+        run: node --test scripts/homebrew-formula.test.mjs scripts/cli-dist-test.test.mjs
       - name: build wasm
         run: cargo build -p quelda-core -p quelda-wasm --target wasm32-unknown-unknown --profile release-wasm
+
+  # CLI as released (plan Step 14): static musl binary, tested in containers
+  # (scratch, alpine, debian, ubuntu, busybox) against every golden case.
+  cli:
+    runs-on: ubuntu-latest
+    env:
+      CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: rust-lld
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: build static binary
+        run: |
+          cargo build --locked --release -p quelda-cli --target x86_64-unknown-linux-musl
+          file target/x86_64-unknown-linux-musl/release/quelda | grep -E 'statically linked|static-pie linked'
+      - name: fixtures + native golden verdicts
+        run: |
+          cargo run --locked -q -p quelda-testkit --bin gen-fixtures
+          cargo run --locked -q -p quelda-wasm --example wasm_golden
+      - name: binary on the runner and in containers
+        run: |
+          node scripts/cli-dist-test.mjs --bin target/x86_64-unknown-linux-musl/release/quelda
+          node scripts/cli-dist-test.mjs --bin target/x86_64-unknown-linux-musl/release/quelda --docker linux/amd64
 
   # Throughput gate (plan Step 16, ADR #29): PR head vs its base on the same
   # runner; fails on a verdict change or > 15 % slower on a heavy file.

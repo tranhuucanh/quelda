@@ -55,8 +55,16 @@ describe('npm pack', () => {
     for (const t of targets) expect(files, t).toContain(t.replace(/^\.\//, ''));
   });
 
-  it('stays private until the first real release', () => {
-    expect(pkg.private).toBe(true);
+  it('is publishable, with provenance pointing at the source repo', () => {
+    expect(pkg.private).toBeUndefined();
+    expect(pkg.publishConfig).toEqual({ access: 'public', provenance: true });
+    // npm checks provenance against this URL; it must name the GitHub repo.
+    expect(pkg.repository).toEqual({
+      type: 'git',
+      url: 'git+https://github.com/tranhuucanh/quelda.git',
+      directory: 'packages/quelda-js',
+    });
+    expect(pkg.version).toMatch(/^\d+\.\d+\.\d+(-rc\.\d+)?$/);
     expect(pkg.engines.node).toBe('>=20');
     expect(pkg.type).toBe('module');
     expect(pkg.license).toBe('MIT OR Apache-2.0');

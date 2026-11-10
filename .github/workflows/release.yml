@@ -1,0 +1,280 @@
+# Release (plan Step 14, ADR #34). Push a tag `vX.Y.Z` or `vX.Y.Z-rc.N` that
+# equals the Cargo.toml version (scripts/bump-version.sh) on a commit of main:
+#
+#   1. build   CLI for Linux x64/arm64 (static musl) and macOS arm64, each on
+#              its own runner; test the binary as shipped (scripts/cli-dist-test.mjs:
+#              containers `scratch`, alpine, debian, ubuntu, busybox; every golden case)
+#   2. release GitHub Release with the archives, SHA256SUMS and build provenance
+#              attestations (`-rc` → pre-release)
+#   3. npm     test + publish `quelda` with provenance (`-rc` → dist-tag `next`)
+#   4. brew    final releases only: generate the formula, brew install/test/audit
+#              on macOS and Linux, push it to tranhuucanh/homebrew-quelda
+#
+# Jobs that publish run in the `release` environment (required reviewer: the
+# maintainer). Secrets: NPM_TOKEN (until npm trusted publishing is set up),
+# HOMEBREW_TAP_TOKEN (fine-grained PAT: Contents read/write on the tap only).
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  meta:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      base: ${{ steps.v.outputs.base }}
+      prerelease: ${{ steps.v.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: v
+        name: tag == Cargo.toml version, commit on main
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          cargo_version="$(sed -n '/^\[workspace\.package\]/,/^\[/s/^version = "\(.*\)"$/\1/p' Cargo.toml)"
+          if [ "$version" != "$cargo_version" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match Cargo.toml version $cargo_version"
+            exit 1
+          fi
+          if ! echo "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-rc\.[1-9][0-9]*)?$'; then
+            echo "::error::version $version is not X.Y.Z or X.Y.Z-rc.N"
+            exit 1
+          fi
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main || { echo "::error::$GITHUB_SHA is not on main"; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "base=${version%%-*}" >> "$GITHUB_OUTPUT"
+          case "$version" in
+            *-rc.*) echo "prerelease=true" >> "$GITHUB_OUTPUT" ;;
+            *) echo "prerelease=false" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+  build:
+    needs: meta
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-24.04
+            platform: linux/amd64
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-24.04-arm
+            platform: linux/arm64
+          - target: aarch64-apple-darwin
+            os: macos-15
+    runs-on: ${{ matrix.os }}
+    env:
+      # Static musl binaries linked by the toolchain's own lld (no musl-gcc).
+      CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: rust-lld
+      CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: rust-lld
+      MACOSX_DEPLOYMENT_TARGET: "11.0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: build
+        run: |
+          QUELDA_BUILD_COMMIT="$(git rev-parse --short=12 HEAD)"
+          QUELDA_BUILD_DATE="$(date -u +%Y-%m-%d)"
+          export QUELDA_BUILD_COMMIT QUELDA_BUILD_DATE
+          cargo build --locked --release -p quelda-cli --target ${{ matrix.target }}
+          bin="target/${{ matrix.target }}/release/quelda"
+          "$bin" --version
+          test "$("$bin" --version | head -n1)" = "quelda ${{ needs.meta.outputs.version }}"
+      - name: static binary (Linux)
+        if: matrix.platform
+        run: file "target/${{ matrix.target }}/release/quelda" | grep -E 'statically linked|static-pie linked'
+      - name: fixtures + native golden verdicts
+        run: |
+          cargo run --locked -q -p quelda-testkit --bin gen-fixtures
+          cargo run --locked -q -p quelda-wasm --example wasm_golden
+      - name: test the binary on the runner
+        run: node scripts/cli-dist-test.mjs --bin "target/${{ matrix.target }}/release/quelda"
+      - name: test the binary in containers
+        if: matrix.platform
+        run: node scripts/cli-dist-test.mjs --bin "target/${{ matrix.target }}/release/quelda" --docker ${{ matrix.platform }}
+      - name: package
+        run: |
+          mkdir -p stage dist
+          cp "target/${{ matrix.target }}/release/quelda" LICENSE-MIT LICENSE-APACHE stage/
+          tar -C stage -czf "dist/quelda-${{ matrix.target }}.tar.gz" quelda LICENSE-MIT LICENSE-APACHE
+      - uses: actions/upload-artifact@v4
+        with:
+          name: quelda-${{ matrix.target }}
+          path: dist/quelda-${{ matrix.target }}.tar.gz
+          if-no-files-found: error
+
+  release:
+    needs: [meta, build]
+    runs-on: ubuntu-24.04
+    environment: release
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: quelda-*
+          path: dist
+          merge-multiple: true
+      - name: SHA256SUMS
+        working-directory: dist
+        run: |
+          set -- quelda-*.tar.gz
+          test "$#" -eq 3
+          sha256sum -- "$@" > SHA256SUMS
+          cat SHA256SUMS
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/*.tar.gz
+      - name: release notes from CHANGELOG.md
+        run: |
+          awk -v h="## [${{ needs.meta.outputs.base }}]" '
+            index($0, h) == 1 { on = 1; next }
+            on && /^## \[/ { exit }
+            on { print }
+          ' CHANGELOG.md > notes.md
+          test -s notes.md || { echo "::error::CHANGELOG.md has no section ${{ needs.meta.outputs.base }}"; exit 1; }
+          cat >> notes.md <<'EOF'
+
+          ### Install
+
+          See the [README](https://github.com/tranhuucanh/quelda#install). Verify a download with
+          `sha256sum -c SHA256SUMS --ignore-missing` and
+          `gh attestation verify <file> --repo tranhuucanh/quelda`.
+          EOF
+      - name: create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          flags=()
+          if [ "${{ needs.meta.outputs.prerelease }}" = "true" ]; then flags+=(--prerelease); else flags+=(--latest); fi
+          gh release create "$GITHUB_REF_NAME" dist/*.tar.gz dist/SHA256SUMS \
+            --verify-tag --title "quelda ${{ needs.meta.outputs.version }}" --notes-file notes.md "${flags[@]}"
+
+  npm:
+    needs: [meta, release]
+    runs-on: ubuntu-24.04
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      BINARYEN_VERSION: "133"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      # npm >= 11.5.1: trusted publishing (OIDC) when configured on npmjs.com.
+      - run: npm install -g npm@11.5.1
+      - name: install wasm-bindgen-cli
+        run: cargo install wasm-bindgen-cli --version 0.2.130 --locked
+      - name: install binaryen (wasm-opt)
+        run: |
+          curl -sSfL "https://github.com/WebAssembly/binaryen/releases/download/version_${BINARYEN_VERSION}/binaryen-version_${BINARYEN_VERSION}-x86_64-linux.tar.gz" | tar -xz -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/binaryen-version_${BINARYEN_VERSION}/bin" >> "$GITHUB_PATH"
+      - name: fixtures + wasm tests
+        run: |
+          cargo run --locked -q -p quelda-testkit --bin gen-fixtures
+          scripts/wasm-test.sh
+      - name: npm tests (package + examples from the packed tarball)
+        working-directory: packages/quelda-js
+        run: |
+          npm ci --no-audit --no-fund
+          npm test
+          npm run test:examples
+          test "$(node -p 'require("./package.json").version')" = "${{ needs.meta.outputs.version }}"
+      - name: publish
+        working-directory: packages/quelda-js
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          tag=latest
+          if [ "${{ needs.meta.outputs.prerelease }}" = "true" ]; then tag=next; fi
+          npm publish --provenance --access public --tag "$tag"
+
+  brew-test:
+    needs: [meta, release]
+    if: needs.meta.outputs.prerelease == 'false'
+    strategy:
+      matrix:
+        os: [macos-15, ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+    # Homebrew on Linux arm64 is not a Tier 1 platform: report, do not block.
+    continue-on-error: ${{ matrix.os == 'ubuntu-24.04-arm' }}
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      HOMEBREW_NO_INSTALL_FROM_API: "1"
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: formula
+        run: |
+          gh release download "$GITHUB_REF_NAME" --pattern SHA256SUMS
+          node scripts/homebrew-formula.mjs "${{ needs.meta.outputs.version }}" SHA256SUMS > quelda.rb
+          cat quelda.rb
+      - name: brew install / test / audit (local tap)
+        run: |
+          if [ -x /home/linuxbrew/.linuxbrew/bin/brew ]; then eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"; fi
+          if ! command -v brew >/dev/null; then
+            NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+            eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+          fi
+          brew tap-new --no-git quelda-ci/local
+          cp quelda.rb "$(brew --repository quelda-ci/local)/Formula/quelda.rb"
+          brew trust quelda-ci/local 2>/dev/null || true
+          brew install --formula quelda-ci/local/quelda
+          brew test quelda-ci/local/quelda
+          brew audit --strict --formula quelda-ci/local/quelda
+          quelda --version
+      - uses: actions/upload-artifact@v4
+        if: matrix.os == 'macos-15'
+        with:
+          name: homebrew-formula
+          path: quelda.rb
+
+  brew-publish:
+    needs: [meta, brew-test]
+    runs-on: ubuntu-24.04
+    environment: release
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: homebrew-formula
+      - name: push Formula/quelda.rb to tranhuucanh/homebrew-quelda
+        env:
+          TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          git clone "https://x-access-token:${TOKEN}@github.com/tranhuucanh/homebrew-quelda.git" tap
+          mkdir -p tap/Formula
+          cp quelda.rb tap/Formula/quelda.rb
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/quelda.rb
+          git commit -m "quelda ${{ needs.meta.outputs.version }}"
+          git push origin HEAD
