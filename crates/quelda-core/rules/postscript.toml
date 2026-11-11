@@ -22,5 +22,5 @@ locked = true
 stage = "stable"
 since = "0.1.0"
 message = "PostScript operator in a content stream"
-description = "The PS content operator (ISO 32000-1 §8.8.2, deprecated) hands its operand to a PostScript interpreter. Checked in every content stream: page contents, Form XObjects, appearance streams, Type 3 glyph procedures, and streams of unknown role."
+description = "The PS content operator (ISO 32000-1 §8.8.2, deprecated) hands its operand to a PostScript interpreter. Checked in every content stream: page contents, Form XObjects, appearance streams, Type 3 glyph procedures, and streams of unknown role; and, from 0.2.0, in every default appearance string (/DA of forms, fields and free-text annotations), which readers run to draw field values."
 match = { content_op = "PS" }

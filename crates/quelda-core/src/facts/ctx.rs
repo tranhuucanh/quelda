@@ -435,14 +435,17 @@ impl<'a> Ctx<'a> {
             .push(EngineIssue::new(code, offset, msg));
     }
 
-    /// The single traversal: every dictionary (file order), then every
-    /// operator of every content stream (known and speculative). Stops
-    /// between dictionaries / streams once [`Visitor::done`].
+    /// The single traversal: every dictionary (file order), each followed
+    /// by the operators of its `/DA` strings, then every operator of every
+    /// content stream (known and speculative). Stops between dictionaries /
+    /// streams once [`Visitor::done`].
     pub fn walk(&self, v: &mut dyn Visitor) {
         visit_dicts(&self.doc.objects, |d, loc| {
-            if !v.done() {
-                v.dict(d, loc);
+            if v.done() {
+                return;
             }
+            v.dict(d, loc);
+            self.default_appearance(d, loc, v);
         });
         for (i, entry) in self.doc.objects.iter().enumerate() {
             if v.done() {
@@ -479,6 +482,30 @@ impl<'a> Ctx<'a> {
                     );
                 }
             }
+        }
+    }
+}
+
+impl Ctx<'_> {
+    /// The operators of `dict`'s `/DA` strings (default appearance of forms,
+    /// fields and free-text annotations, ISO 32000-2 §12.7.4.3): content
+    /// stream syntax that readers run to draw field values. Located at the
+    /// dictionary, the offset being in the string.
+    fn default_appearance(&self, dict: &Dict, loc: &Location, v: &mut dyn Visitor) {
+        for s in dict
+            .get_all("DA")
+            .flat_map(|o| self.resolve(o))
+            .filter_map(PdfObject::as_string)
+        {
+            // A broken operand hides nothing a stream could not: ignored.
+            let _ = tokenize(s, &self.limits, |op| {
+                let at = OpLocation {
+                    stream: loc.clone(),
+                    offset: op.offset,
+                    speculative: false,
+                };
+                v.content_op(op, &at);
+            });
         }
     }
 }

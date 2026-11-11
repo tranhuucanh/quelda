@@ -50,6 +50,12 @@ const INDIRECT_VALUES: &[(&str, &str, &str)] = &[
     ("CODEC.JPX", "Filter", "/JPXDecode"),
     ("RESOURCE.IMAGE_DIMENSIONS", "Width", "100000"),
     ("RESOURCE.PAGE_SIZE", "MediaBox", "[0 0 100000 100000]"),
+    (
+        "CODEC.DECODE_PARAMS",
+        "DecodeParms",
+        "<< /Predictor 12 /Colors 3 /Columns 2147483647 >>",
+    ),
+    ("STRUCT.PRINT_VIEW_MISMATCH", "F", "36"),
 ];
 
 /// Where a standalone payload object (number 10) is referenced from.
@@ -298,6 +304,35 @@ pub(crate) fn cases() -> Vec<DictCase> {
             Payload::Page("/MediaBox [0 0 100000 100000]".to_string()),
             &["MediaBox"],
             "Page bomb: 100000 pt square page (~35 m)",
+        ),
+        case(
+            "EXTERNAL.OPI",
+            stream_obj(
+                "/Type /XObject /Subtype /Image /Width 1 /Height 1 /ColorSpace /DeviceGray /BitsPerComponent 8 /OPI << /2.0 << /Type /OPI /Version 2.0 /F (quelda-test.tif) /Inks /full_color >> >>",
+                &[0u8],
+                XObject,
+            ),
+            &["OPI"],
+            "Image with OPI comments naming a (missing) high-resolution file",
+        ),
+        case(
+            "CODEC.DECODE_PARAMS",
+            stream_obj(
+                "/Type /XObject /Subtype /Image /Width 1 /Height 1 /ColorSpace /DeviceGray /BitsPerComponent 8 /DecodeParms << /Predictor 12 /Colors 3 /Columns 2147483647 >>",
+                &[0u8],
+                XObject,
+            ),
+            &["DecodeParms", "Columns"],
+            "Image whose predictor parameters declare 2^31 columns (data not filtered)",
+        ),
+        case(
+            "STRUCT.PRINT_VIEW_MISMATCH",
+            obj(
+                "<< /Type /Annot /Subtype /Stamp /Rect [0 0 10 10] /F 36 /Contents (quelda-test) >>",
+                PageAnnot,
+            ),
+            &["Annot"],
+            "Stamp annotation flagged Print + NoView: printed, not shown on screen",
         ),
     ];
 
