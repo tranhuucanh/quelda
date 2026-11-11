@@ -13,6 +13,15 @@ client and on the server**, with the same engine, the same rules and the same ve
 It stops PostScript/EPS disguised as PDF, embedded PostScript, JavaScript, Launch actions,
 compression bombs and tampered structure, and says which rule each file breaks.
 
+## Documentation
+
+| Guide | Read it to |
+|---|---|
+| [**Rules**](docs/rules.md) | See every rule: what it catches, and whether it blocks, warns or is off in each preset |
+| [**Policies**](docs/policy.md) | Choose a preset, write your own policy, relax or tighten one rule, raise limits |
+| [**CLI**](docs/cli.md) | Install on a server or in Docker, options, exit codes, call it from Python, Ruby, Node.js, Go, PHP, Java |
+| [**npm package**](packages/quelda-js/README.md) | Use it in the browser: React, Vite, webpack, no bundler, CDN |
+
 ## What quelda checks
 
 **40 rules in 11 categories**, plus 12 engine safeguards that refuse to judge what cannot be
