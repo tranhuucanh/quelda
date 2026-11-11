@@ -106,11 +106,15 @@ Start from a preset and change only what you need. In the CLI:
 ```bash
 quelda scan upload.pdf --preset strict                     # a preset only
 quelda scan upload.pdf --policy policy.json                # a policy file
+quelda scan upload.pdf --rule EXTERNAL.URI=off              # one rule, no JSON
 quelda scan upload.pdf --policy-json '{"rules": {"EXTERNAL.URI": "off"}}'
 quelda scan upload.pdf --policy policy.json --preset strict --stop-on-first
 ```
 
-`--preset` replaces the `preset` of the policy file; `--stop-on-first` sets `stop_on_first`.
+`--preset` replaces the `preset` of the policy file; `--rule ID=action` (repeatable) sets one
+entry of `rules`, winning over the file; `--stop-on-first` sets `stop_on_first`. A locked rule
+lowered without `unsafe_allow_unlock` still blocks, and the CLI prints a warning on stderr.
+`quelda help policy` prints a summary of this page.
 
 In the npm package, pass the same object:
 

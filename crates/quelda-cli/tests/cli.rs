@@ -64,10 +64,13 @@ fn verdict(out: &Output) -> Value {
         _ => 2,
     };
     assert_eq!(out.status.code(), Some(want), "{text}");
+    // Only the warning about a locked rule the policy tried to lower.
+    let err = String::from_utf8_lossy(&out.stderr);
     assert!(
-        out.stderr.is_empty(),
-        "{}",
-        String::from_utf8_lossy(&out.stderr)
+        err.lines().all(
+            |l| l.starts_with("quelda: warning: ") && l.contains(" is locked and still blocks")
+        ),
+        "{err}"
     );
     v
 }

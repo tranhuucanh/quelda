@@ -92,6 +92,7 @@ cargo install --locked --git https://github.com/tranhuucanh/quelda quelda-cli
 quelda scan upload.pdf                         # default preset (balanced); JSON verdict on stdout
 quelda scan upload.pdf --preset strict
 quelda scan upload.pdf --policy policy.json
+quelda scan upload.pdf --rule EMBED.EMBEDDED_FILE=warn --rule EXTERNAL.URI=off
 quelda scan upload.pdf --policy-json '{"rules": {"EMBED.EMBEDDED_FILE": "warn"}}'
 quelda scan - < upload.pdf                     # read the file from stdin
 quelda scan upload.pdf --format text           # human-readable
@@ -100,6 +101,7 @@ quelda scan upload.pdf --format text           # human-readable
 | Option | Meaning |
 |---|---|
 | `-p`, `--preset strict\|balanced\|permissive` | Preset. Overrides the preset of `--policy` / `--policy-json`. Default: `balanced`. |
+| `--rule <ID>=<action>` | Action of one rule: `off`, `warn` or `block`. Repeat it for more rules. Wins over the same rule in `--policy` / `--policy-json`. |
 | `--policy <file>` | Policy JSON file. |
 | `--policy-json <json>` | Policy as a JSON string. |
 | `--stop-on-first` | Stop at the first blocking finding: faster on bad files, lists fewer reasons. |
@@ -196,7 +198,7 @@ two runs give the same output. Paths are printed as you typed them (`uploads/…
 | `--no-hash` | Do not compute the SHA-256 (`"sha256": null`); about 15% faster. |
 | `-j`, `--jobs <n>` | Files scanned at once. Default: one per CPU core. |
 
-`--preset`, `--policy`, `--policy-json` and `--stop-on-first` apply to every file. An invalid
+`--preset`, `--rule`, `--policy`, `--policy-json` and `--stop-on-first` apply to every file. An invalid
 policy scans nothing (exit code `2`, message on stderr).
 
 **Exit code**: `0` only when every file is `PASS`; `2` when any file is `ERROR`, or when no
@@ -295,6 +297,16 @@ The short version:
 
 Pass it with `--policy policy.json` or `--policy-json '…'`; `--preset` and `--stop-on-first`
 override the policy's `preset` and `stop_on_first`.
+
+To change a few rules from the command line, `--rule` is shorter than JSON (it wins over the
+same rule in the policy):
+
+```bash
+quelda scan upload.pdf --preset strict --rule EXTERNAL.URI=off --rule EMBED.EMBEDDED_FILE=warn
+```
+
+Lowering a locked rule (`[locked]` in `quelda rules -f text`) has no effect: the rule still
+blocks and quelda prints a warning on stderr. `quelda help policy` sums all this up.
 
 ### Keep every engine on the same rule set
 
@@ -554,6 +566,7 @@ quelda version                  # version, commit, build date, number of rules (
 quelda version -f json
 quelda --help                   # the commands, common options and examples (also -h)
 quelda help scan                # every scan option
+quelda help policy              # how to change rules, with examples
 ```
 
 Short options: `-p` is `--preset`, `-f` is `--format`, `-j` is `--jobs`, `-h` is `--help`,

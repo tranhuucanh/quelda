@@ -1,13 +1,15 @@
 //! Command-line arguments (design §8.3). Hand-written: a usage error must
 //! exit 64, never 2 (2 is an `ERROR` verdict), and the grammar is small.
 //!
-//! Every option takes `--name value` or `--name=value`, at most once; `--`
-//! ends options (for a file named `-x`); `-` is stdin.
+//! Every option takes `--name value` or `--name=value`, at most once
+//! (`--rule` as often as needed); `--` ends options (for a file named `-x`);
+//! `-` is stdin.
 
 use std::ffi::OsString;
 use std::path::PathBuf;
 
 use quelda_core::policy::Preset;
+use quelda_core::rules::Action;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Format {
@@ -40,6 +42,8 @@ pub struct Scan {
     pub policy: Option<PolicySource>,
     /// Overrides the policy's `preset`.
     pub preset: Option<Preset>,
+    /// `--rule ID=action`, in order: override the policy's `rules`.
+    pub rules: Vec<(String, Action)>,
     /// Sets the policy's `stop_on_first`.
     pub stop_on_first: bool,
     /// `None`: `json` for one file, `jsonl` for several.
@@ -111,14 +115,19 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command, UsageE
         }),
         Some("help" | "--help" | "-h") => match rest.first().and_then(|a| a.to_str()) {
             None => Ok(Command::Help { topic: None }),
-            Some(t @ ("scan" | "rules" | "version")) if rest.len() == 1 => Ok(Command::Help {
-                topic: Some(static_topic(t)),
-            }),
+            Some(t @ ("scan" | "rules" | "version" | "policy")) if rest.len() == 1 => {
+                Ok(Command::Help {
+                    topic: Some(static_topic(t)),
+                })
+            }
             Some(_) => Err(usage(format!("unknown help topic `{}`", lossy(&rest[0])))),
         },
         _ => Err(usage(format!("unknown command `{}`", lossy(&first)))),
     }
 }
+
+/// Valued options that may be given more than once.
+const REPEATABLE: [&str; 1] = ["rule"];
 
 /// Short forms of valued options.
 const SHORT: [(&str, &str); 3] = [("-j", "jobs"), ("-p", "preset"), ("-f", "format")];
@@ -127,6 +136,7 @@ fn static_topic(t: &str) -> &'static str {
     match t {
         "scan" => "scan",
         "rules" => "rules",
+        "policy" => "policy",
         _ => "version",
     }
 }
@@ -134,7 +144,7 @@ fn static_topic(t: &str) -> &'static str {
 fn parse_scan(rest: Vec<OsString>) -> Result<Command, UsageError> {
     let o = Options::parse(
         rest,
-        &["policy", "policy-json", "preset", "format", "jobs"],
+        &["policy", "policy-json", "preset", "rule", "format", "jobs"],
         &["stop-on-first", "all", "absolute", "no-hash"],
         "scan",
     )?;
@@ -192,6 +202,27 @@ fn parse_scan(rest: Vec<OsString>) -> Result<Command, UsageError> {
             ));
         }
     };
+    let mut rules: Vec<(String, Action)> = Vec::new();
+    for v in o.values_of("rule") {
+        let (id, action) = v
+            .to_str()
+            .and_then(|t| t.split_once('='))
+            .ok_or_else(|| usage("scan: --rule needs ID=off, ID=warn or ID=block"))?;
+        let action = match action {
+            "off" => Action::Off,
+            "warn" => Action::Warn,
+            "block" => Action::Block,
+            _ => {
+                return Err(usage(format!(
+                    "scan: --rule {id}: the action must be off, warn or block, not `{action}`"
+                )));
+            }
+        };
+        if rules.iter().any(|(r, _)| r == id) {
+            return Err(usage(format!("scan: --rule {id} given twice")));
+        }
+        rules.push((id.to_string(), action));
+    }
     let format = match o.value("format") {
         None => None,
         Some(_) => Some(o.format_of(&[
@@ -205,6 +236,7 @@ fn parse_scan(rest: Vec<OsString>) -> Result<Command, UsageError> {
         inputs,
         policy,
         preset,
+        rules,
         stop_on_first: o.flags.contains(&"stop-on-first"),
         format,
         all: o.flags.contains(&"all"),
@@ -293,7 +325,7 @@ impl Options {
                         .next()
                         .ok_or_else(|| usage(format!("{command}: --{key} needs a value")))?,
                 };
-                if o.value(key).is_some() {
+                if o.value(key).is_some() && !REPEATABLE.contains(&key) {
                     return Err(usage(format!("{command}: --{key} given twice")));
                 }
                 o.values.push((key, value));
@@ -306,6 +338,14 @@ impl Options {
 
     fn value(&self, key: &str) -> Option<&OsString> {
         self.values.iter().find(|(k, _)| *k == key).map(|(_, v)| v)
+    }
+
+    fn values_of(&self, key: &str) -> Vec<&OsString> {
+        self.values
+            .iter()
+            .filter(|(k, _)| *k == key)
+            .map(|(_, v)| v)
+            .collect()
     }
 
     fn format(&self) -> Result<Format, UsageError> {
@@ -572,7 +612,48 @@ mod tests {
                 topic: Some("rules")
             })
         );
+        assert_eq!(
+            p(&["help", "policy"]),
+            Ok(Command::Help {
+                topic: Some("policy")
+            })
+        );
         assert!(err(&["help", "nope"]).contains("unknown help topic"));
+    }
+
+    #[test]
+    fn rule_overrides() {
+        let s = scan(&[
+            "scan",
+            "a.pdf",
+            "--rule",
+            "EXTERNAL.URI=off",
+            "--rule=ACTIVE.JAVASCRIPT=warn",
+            "--rule",
+            "STRUCT.MISSING_EOF=block",
+        ]);
+        assert_eq!(
+            s.rules,
+            [
+                ("EXTERNAL.URI".to_string(), Action::Off),
+                ("ACTIVE.JAVASCRIPT".to_string(), Action::Warn),
+                ("STRUCT.MISSING_EOF".to_string(), Action::Block),
+            ]
+        );
+        assert!(scan(&["scan", "a.pdf"]).rules.is_empty());
+        assert!(err(&["scan", "a.pdf", "--rule"]).contains("--rule needs a value"));
+        assert!(
+            err(&["scan", "a.pdf", "--rule", "EXTERNAL.URI"])
+                .contains("ID=off, ID=warn or ID=block")
+        );
+        assert!(err(&["scan", "a.pdf", "--rule", "EXTERNAL.URI=Off"]).contains("not `Off`"));
+        assert!(
+            err(&["scan", "a.pdf", "--rule", "X.Y=off", "--rule", "X.Y=warn"])
+                .contains("--rule X.Y given twice")
+        );
+        // Only `scan` takes it; other options still once.
+        assert!(err(&["rules", "--rule", "X.Y=off"]).contains("unknown option `--rule`"));
+        assert!(err(&["scan", "a.pdf", "-p", "strict", "-p", "strict"]).contains("given twice"));
     }
 
     #[test]

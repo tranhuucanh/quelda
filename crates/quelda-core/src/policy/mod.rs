@@ -209,6 +209,21 @@ impl Policy {
         self.unsafe_allow_unlock.unwrap_or(false)
     }
 
+    /// Locked rules of `rules` that `rules` overrides below `block` without
+    /// `unsafe_allow_unlock`: the override is ignored (they still block),
+    /// which callers can tell the user.
+    pub fn ignored_unlocks(&self, rules: &[&dyn Rule]) -> Vec<&'static str> {
+        if self.unsafe_allow_unlock() {
+            return Vec::new();
+        }
+        rules
+            .iter()
+            .map(|r| r.meta())
+            .filter(|m| m.locked && self.rules.get(m.id).is_some_and(|&a| a < Action::Block))
+            .map(|m| m.id)
+            .collect()
+    }
+
     /// Engine limits: defaults overridden by `limits`.
     pub fn limits(&self) -> Limits {
         let p = &self.limits;
@@ -476,6 +491,22 @@ mod tests {
         // Rule IDs are checked against the rule set given.
         let p = parse(r#"{"rules": {"ACTIVE.LAUNCH": "off"}}"#).unwrap();
         assert!(p.validate(&[]).is_err());
+    }
+
+    #[test]
+    fn ignored_unlocks_name_locked_rules_lowered_by_id() {
+        let all = registry::all();
+        let p = parse(
+            r#"{"rules": {"FILETYPE.NOT_PDF_HEADER": "off", "FILETYPE.FOREIGN_MAGIC": "block",
+                "ACTIVE.JAVASCRIPT": "off"}, "categories": {"filetype": "off"}}"#,
+        )
+        .unwrap();
+        assert_eq!(p.ignored_unlocks(all), vec!["FILETYPE.NOT_PDF_HEADER"]);
+        let p =
+            parse(r#"{"rules": {"FILETYPE.NOT_PDF_HEADER": "warn"}, "unsafe_allow_unlock": true}"#)
+                .unwrap();
+        assert!(p.ignored_unlocks(all).is_empty());
+        assert!(Policy::default().ignored_unlocks(all).is_empty());
     }
 
     #[test]

@@ -30,6 +30,15 @@ Three new rules (48 in all). On the real files we test with (147 files, 739 embe
   signature value, or a malformed `/ByteRange`. Only the structure is checked, not the
   cryptography.
 
+### Added
+
+- CLI `--rule ID=action` (`off`, `warn` or `block`; repeat it for more rules): change one rule
+  without writing JSON, e.g. `quelda scan file.pdf --rule EXTERNAL.URI=off`. It wins over the
+  same rule in `--policy` / `--policy-json`.
+- CLI `quelda help policy`: how to change rules, with examples and the policy fields.
+- The CLI warns on stderr when a policy lowers a locked rule without `unsafe_allow_unlock`:
+  the rule still blocks, as before, but now says so instead of staying silent.
+
 ### Changed
 
 - CLI `--help`: shorter, with the common options and examples; the first line says the

@@ -3,7 +3,7 @@
 //! never a crash: callers always get JSON and exit 2 (fail-closed).
 
 use std::fs::File;
-use std::io::{ErrorKind, Read};
+use std::io::{ErrorKind, Read, Write};
 use std::path::Path;
 
 use quelda_core::policy::PolicyError;
@@ -28,9 +28,12 @@ fn stream_cap(policy: &Policy) -> u64 {
     policy.limits.max_file_bytes.unwrap_or(STREAM_MAX_BYTES)
 }
 
-/// Runs one scan of `input`.
-pub fn run(scan: &Scan, input: &Input, stdin: &mut dyn Read) -> Verdict {
+/// Runs one scan of `input`; warnings about the policy go to `err`.
+pub fn run(scan: &Scan, input: &Input, stdin: &mut dyn Read, err: &mut dyn Write) -> Verdict {
     let policy = policy(scan);
+    if let Ok(p) = &policy {
+        warn_ignored_unlocks(p, err);
+    }
     // The input is read even when the policy is invalid, for `stats.bytes`
     // (and so a writer to our stdin is not cut off).
     let cap = policy.as_ref().map_or(0, stream_cap);
@@ -75,7 +78,21 @@ pub fn policy(scan: &Scan) -> Result<Policy, PolicyError> {
     if scan.stop_on_first {
         policy.stop_on_first = Some(true);
     }
+    for (id, action) in &scan.rules {
+        policy.rules.insert(id.clone(), *action);
+    }
     Ok(policy)
+}
+
+/// Tells the user that lowering a locked rule had no effect (it still
+/// blocks). Nothing useful to do if stderr is gone.
+pub fn warn_ignored_unlocks(policy: &Policy, err: &mut dyn Write) {
+    for id in policy.ignored_unlocks(quelda_core::rules::registry::all()) {
+        let _ = writeln!(
+            err,
+            "quelda: warning: {id} is locked and still blocks (lowering it needs \"unsafe_allow_unlock\": true in the policy)"
+        );
+    }
 }
 
 fn read_policy_file(path: &Path) -> Result<String, PolicyError> {
@@ -198,6 +215,7 @@ fn read_stream(r: &mut dyn Read, cap: u64, name: &str) -> Loaded {
 mod tests {
     use super::*;
     use quelda_core::policy::Preset;
+    use quelda_core::rules::Action;
     use quelda_core::verdict::Status;
     use std::io::Cursor;
 
@@ -208,6 +226,7 @@ mod tests {
             inputs: vec![input],
             policy: None,
             preset: None,
+            rules: Vec::new(),
             stop_on_first: false,
             format: None,
             all: false,
@@ -219,7 +238,7 @@ mod tests {
 
     /// `run` on the scan's one input.
     fn run1(scan: &Scan, stdin: &mut dyn Read) -> Verdict {
-        run(scan, &scan.inputs[0], stdin)
+        run(scan, &scan.inputs[0], stdin, &mut Vec::new())
     }
 
     fn tmp(name: &str, bytes: &[u8]) -> std::path::PathBuf {
@@ -258,6 +277,26 @@ mod tests {
         let v = run1(&s, &mut Cursor::new(MINIMAL.to_vec()));
         assert_eq!(v.policy.preset, Some(Preset::Strict));
         assert!(v.policy.stop_on_first);
+        // `--rule` beats the policy's `rules`, and adds to them.
+        s.policy = Some(PolicySource::Json(
+            r#"{"rules":{"EXTERNAL.URI":"off","ACTIVE.OTHER_ACTIONS":"block"}}"#.into(),
+        ));
+        s.rules = vec![
+            ("EXTERNAL.URI".into(), Action::Block),
+            ("ACTIVE.JAVASCRIPT".into(), Action::Off),
+        ];
+        let p = policy(&s).unwrap();
+        let rules: Vec<(&str, Action)> = p.rules.iter().map(|(k, &v)| (k.as_str(), v)).collect();
+        assert_eq!(
+            rules,
+            [
+                ("ACTIVE.JAVASCRIPT", Action::Off),
+                ("ACTIVE.OTHER_ACTIONS", Action::Block),
+                ("EXTERNAL.URI", Action::Block)
+            ]
+        );
+        s.rules.clear();
+        s.policy = Some(PolicySource::Json(r#"{"preset":"permissive"}"#.into()));
         // Without flags the policy is used as written.
         s.preset = None;
         s.stop_on_first = false;
