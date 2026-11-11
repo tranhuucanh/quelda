@@ -1,6 +1,7 @@
 //! One version everywhere (ADR #34 (j)): Cargo.toml is the source; Cargo.lock,
 //! the npm package, its lockfiles and CHANGELOG.md must agree, and docs must
 //! not spell it. `scripts/bump-version.sh` must produce exactly that.
+//! The one-line description is the same everywhere too.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -87,6 +88,39 @@ fn every_place_has_the_cargo_version() {
         wrong.is_empty(),
         "version {VERSION} expected; run scripts/bump-version.sh {VERSION}: {wrong:?}"
     );
+}
+
+/// What quelda is, in every place that says it.
+const TAGLINE: &str = "PDF & Illustrator security scanner";
+
+#[test]
+fn every_place_has_the_same_tagline() {
+    let root = repo();
+    let read = |p: &str| fs::read_to_string(root.join(p)).unwrap_or_else(|e| panic!("{p}: {e}"));
+    let package: Value = serde_json::from_str(&read("packages/quelda-js/package.json")).unwrap();
+    let help = Command::new(env!("CARGO_BIN_EXE_quelda"))
+        .arg("--help")
+        .output()
+        .unwrap();
+    let places = [
+        ("quelda --help", String::from_utf8(help.stdout).unwrap()),
+        ("Cargo.toml", read("Cargo.toml")),
+        (
+            "package.json",
+            package["description"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
+        ),
+        ("Homebrew formula", read("packaging/homebrew/quelda.rb.in")),
+        ("README.md", read("README.md")),
+        ("npm README", read("packages/quelda-js/README.md")),
+    ];
+    for (place, text) in places {
+        assert!(text.contains(TAGLINE), "{place} does not say `{TAGLINE}`");
+    }
+    assert!(read("Cargo.toml").contains(&format!("description = \"{TAGLINE}: ")));
+    assert!(read("packaging/homebrew/quelda.rb.in").contains(&format!("desc \"{TAGLINE}: ")));
 }
 
 #[test]

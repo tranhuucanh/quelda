@@ -8,6 +8,38 @@ engine share one version.
 Rule IDs never change meaning or disappear. A new rule, or a rule that starts to
 match more files, is listed under **Rules** because it can change verdicts.
 
+## [0.3.0] — unreleased
+
+### Rules
+
+Three new rules (48 in all). On the real files we test with (147 files, 739 embedded fonts,
+78 ICC profiles, one signed file), no verdict changed in any preset.
+
+- `CODEC.FONT_MALFORMED` (new; block in strict and balanced, warn in permissive): an
+  embedded TrueType, OpenType or CFF font whose tables or indexes point outside the font
+  (table directory or table past the end, short `head`, glyph offsets past `glyf`, CFF
+  INDEX offsets out of order or past the end, CharStrings or Private data past the end),
+  or a `/FontFile2` that is not a TrueType font. Type 1 fonts stay with `CODEC.TYPE1_FONT`;
+  a font that does not decompress completely is not judged.
+- `CODEC.ICC_MALFORMED` (new; block, block, warn): an embedded ICC colour profile without
+  the `acsp` signature, shorter than its header, with a tag table that does not fit, or with
+  a tag past both the end of the profile and the size it declares. A truncated profile
+  (some OCR tools embed the first part of sRGB) is not judged by its tags.
+- `STRUCT.SIGNATURE_MODIFIED` (new; block, warn, off): a signed file changed after it was
+  signed: bytes after the signed ranges, signed ranges that leave out more than the
+  signature value, or a malformed `/ByteRange`. Only the structure is checked, not the
+  cryptography.
+
+### Changed
+
+- CLI `--help`: shorter, with the common options and examples; the first line says the
+  version and what quelda is. `quelda help scan` lists every scan option by group.
+- CLI short options: `-p` (`--preset`), `-f` (`--format`) and `-v` (`--version`, as `-V`).
+- Package descriptions (Cargo, npm, Homebrew) now say "PDF & Illustrator security scanner:
+  files + policy in, verdict out".
+- Embedded fonts and ICC profiles are decompressed to check their structure, each within
+  the decode limits but not counted in the scan's total.
+
 ## [0.2.0] — 2026-11-11
 
 ### Added

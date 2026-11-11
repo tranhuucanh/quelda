@@ -99,11 +99,11 @@ quelda scan upload.pdf --format text           # human-readable
 
 | Option | Meaning |
 |---|---|
-| `--preset strict\|balanced\|permissive` | Preset. Overrides the preset of `--policy` / `--policy-json`. Default: `balanced`. |
+| `-p`, `--preset strict\|balanced\|permissive` | Preset. Overrides the preset of `--policy` / `--policy-json`. Default: `balanced`. |
 | `--policy <file>` | Policy JSON file. |
 | `--policy-json <json>` | Policy as a JSON string. |
 | `--stop-on-first` | Stop at the first blocking finding: faster on bad files, lists fewer reasons. |
-| `--format json\|text` | `json` (default) is for programs; `text` is for people. |
+| `-f`, `--format json\|text` | `json` (default) is for programs; `text` is for people. |
 | `--` | End of options, for a file name that starts with `-`. |
 
 A regular file is read on demand, so memory use does not grow with its size, and there is no
@@ -190,7 +190,7 @@ two runs give the same output. Paths are printed as you typed them (`uploads/…
 
 | Option | Meaning |
 |---|---|
-| `--format jsonl\|text\|csv` | Default: `jsonl`. (`json` is for one file only.) |
+| `-f`, `--format jsonl\|text\|csv` | Default: `jsonl`. (`json` is for one file only.) |
 | `--all` | In folders, scan every file, not only `.pdf` and `.ai`. |
 | `--absolute` | Print absolute paths. |
 | `--no-hash` | Do not compute the SHA-256 (`"sha256": null`); about 15% faster. |
@@ -549,9 +549,13 @@ public class QueldaScan {
 
 ```bash
 quelda rules                    # every rule as JSON (schemas/rules.schema.json)
-quelda rules --format text      # ID, category, default action, [locked], message
-quelda version                  # version, commit, build date, number of rules
-quelda version --format json
-quelda --help
-quelda help scan
+quelda rules -f text            # ID, category, default action, [locked], message
+quelda version                  # version, commit, build date, number of rules (also -v)
+quelda version -f json
+quelda --help                   # the commands, common options and examples (also -h)
+quelda help scan                # every scan option
 ```
+
+Short options: `-p` is `--preset`, `-f` is `--format`, `-j` is `--jobs`, `-h` is `--help`,
+`-v` (or `-V`) is `--version`. A short option takes its value as the next argument or
+attached (`-f text`, `-ftext`).

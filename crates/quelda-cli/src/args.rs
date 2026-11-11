@@ -106,7 +106,7 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command, UsageE
                 format: o.format_or(Format::Text)?,
             })
         }
-        Some("--version" | "-V") if rest.is_empty() => Ok(Command::Version {
+        Some("--version" | "-V" | "-v") if rest.is_empty() => Ok(Command::Version {
             format: Format::Text,
         }),
         Some("help" | "--help" | "-h") => match rest.first().and_then(|a| a.to_str()) {
@@ -119,6 +119,9 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command, UsageE
         _ => Err(usage(format!("unknown command `{}`", lossy(&first)))),
     }
 }
+
+/// Short forms of valued options.
+const SHORT: [(&str, &str); 3] = [("-j", "jobs"), ("-p", "preset"), ("-f", "format")];
 
 fn static_topic(t: &str) -> &'static str {
     match t {
@@ -251,18 +254,22 @@ impl Options {
                 });
                 continue;
             }
-            // `-j N` / `-jN`: the one short option, for `--jobs`.
+            // Short options: `-x V` / `-xV` for a valued option `--long`.
             let short;
-            let text = match text.strip_prefix("-j") {
-                Some(n) if valued.contains(&"jobs") => {
-                    short = if n.is_empty() {
-                        "--jobs".to_string()
+            let long = SHORT.iter().find_map(|&(flag, long)| {
+                let v = text.strip_prefix(flag)?;
+                valued.contains(&long).then_some((long, v))
+            });
+            let text = match long {
+                Some((long, v)) => {
+                    short = if v.is_empty() {
+                        format!("--{long}")
                     } else {
-                        format!("--jobs={n}")
+                        format!("--{long}={v}")
                     };
                     short.as_str()
                 }
-                _ => text,
+                None => text,
             };
             let Some(body) = text.strip_prefix("--") else {
                 return Err(usage(format!("{command}: unknown option `{text}`")));
@@ -408,7 +415,19 @@ mod tests {
             ("csv", Format::Csv),
         ] {
             assert_eq!(scan(&["scan", "a", "--format", v]).format, Some(f));
+            assert_eq!(scan(&["scan", "a", "-f", v]).format, Some(f));
+            assert_eq!(scan(&["scan", "a", &format!("-f{v}")]).format, Some(f));
         }
+        assert_eq!(
+            scan(&["scan", "a", "-p", "strict"]).preset,
+            Some(Preset::Strict)
+        );
+        assert_eq!(
+            scan(&["scan", "a", "-ppermissive"]).preset,
+            Some(Preset::Permissive)
+        );
+        assert!(err(&["scan", "a", "-p", "strict", "--preset", "strict"]).contains("given twice"));
+        assert!(err(&["scan", "a", "-x"]).contains("unknown option `-x`"));
         // `--` makes `-j` a file.
         assert_eq!(
             scan(&["scan", "--", "-j", "b"]).inputs,
@@ -511,7 +530,13 @@ mod tests {
                 format: Format::Json
             })
         );
-        for v in ["--version", "-V"] {
+        assert_eq!(
+            p(&["rules", "-f", "text"]),
+            Ok(Command::Rules {
+                format: Format::Text
+            })
+        );
+        for v in ["--version", "-V", "-v"] {
             assert_eq!(
                 p(&[v]),
                 Ok(Command::Version {
