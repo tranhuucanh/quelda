@@ -1,18 +1,17 @@
 # quelda
 
-quelda checks **PDF files and Adobe Illustrator (`.ai`) files** for attacks. Run it **in the
-browser**, to refuse a bad file before it is even uploaded, and **on your server**, before a
-file reaches Ghostscript, ImageMagick, a print RIP or a thumbnailer. It stops PostScript/EPS
-disguised as PDF, embedded PostScript, JavaScript, Launch actions, compression bombs and
-tampered structure, and says which rule each file breaks.
+quelda checks **PDF and Adobe Illustrator (`.ai`) files** for attacks, and runs **both on the
+client and on the server**, with the same engine, the same rules and the same verdict:
 
-One Rust engine, two forms, the same verdicts:
+| | Client (browser) | Server (backend) |
+|---|---|---|
+| **Form** | WebAssembly package on npm: [`quelda`](https://www.npmjs.com/package/quelda) | `quelda` CLI, a single static binary ([docs/cli.md](docs/cli.md)) |
+| **Runs** | In a Web Worker, in the user's browser | macOS and Linux (x64, arm64), Docker, any backend language |
+| **Use it to** | Refuse a bad file instantly, before it is uploaded | Block a bad file before it reaches Ghostscript, ImageMagick, a print RIP or a thumbnailer |
+| **Works with** | Vite, webpack, esbuild, plain `<script type="module">`, CDN | Python, Ruby, Node.js, Go, PHP, Java, … |
 
-- **`quelda` CLI** for backends in any language: macOS and Linux (static binaries for x64 and
-  arm64, any distribution, Docker). See [docs/cli.md](docs/cli.md).
-- **WebAssembly on npm**: [`quelda`](https://www.npmjs.com/package/quelda) scans files right in
-  the browser, in a Web Worker, before the upload. Works with Vite, webpack, esbuild, a plain
-  `<script type="module">` or straight from a CDN. See [In the browser](#in-the-browser).
+It stops PostScript/EPS disguised as PDF, embedded PostScript, JavaScript, Launch actions,
+compression bombs and tampered structure, and says which rule each file breaks.
 
 ## What quelda checks
 
