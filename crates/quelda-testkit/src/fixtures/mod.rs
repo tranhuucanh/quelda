@@ -7,6 +7,7 @@
 //! 10–19 payload, 20+ helper objects.
 
 mod adr26;
+mod batch_c;
 mod benign;
 mod dict_cases;
 mod filetype;
@@ -274,6 +275,7 @@ pub fn all() -> Vec<Fixture> {
     out.extend(dict_cases::all());
     out.extend(special::all());
     out.extend(adr26::all());
+    out.extend(batch_c::all());
     out
 }
 

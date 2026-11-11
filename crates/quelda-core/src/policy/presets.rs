@@ -53,10 +53,14 @@ const CATEGORIES: [(Category, [Action; 3]); 11] = [
 
 /// Rules whose preset action differs from their category's (design §6.2).
 /// The `balanced` column must equal the rule's `default_action`.
-const RULES: [(&str, [Action; 3]); 3] = [
+const RULES: [(&str, [Action; 3]); 7] = [
     ("ACTIVE.OTHER_ACTIONS", [B, W, W]),
     ("STRUCT.INCREMENTAL_UPDATE", [W, O, O]),
     ("CODEC.TYPE1_FONT", [W, O, O]),
+    ("EXTERNAL.STREAM_FILE", [B, B, W]),
+    ("EXTERNAL.OPI", [B, B, W]),
+    ("STRUCT.NAME_TOO_LONG", [B, B, B]),
+    ("CODEC.DECODE_PARAMS", [B, B, B]),
 ];
 
 /// Preset action of a category.

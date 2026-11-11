@@ -60,3 +60,15 @@ since = "0.1.0"
 message = "File specification points at a URL"
 description = "A URL file specification (/FS /URL, ISO 32000-2 §7.11.5): the referenced file (an external stream, a remote document, a form data file…) is fetched from the network."
 match = { dict = { key = "FS", name = "URL" } }
+
+[[rule]]
+id = "EXTERNAL.OPI"
+category = "external"
+severity = "high"
+default_action = "block"
+locked = false
+stage = "stable"
+since = "0.2.0"
+message = "Image or form is replaced by an external file (OPI)"
+description = "An OPI dictionary (/OPI in an Image or Form XObject, or /Type /OPI, ISO 32000-1 §14.11.7): Open Prepress Interface comments that tell prepress software to swap the content for a high-resolution file named by path. Print workflows that honour OPI read files from their own disk or network; modern tools do not write it."
+match = { dict = { any = [ { key = "OPI" }, { key = "Type", name = "OPI" } ] } }

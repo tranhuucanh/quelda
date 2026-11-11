@@ -109,6 +109,16 @@ pub fn read_error(message: &str, policy: &Policy) -> Verdict {
     scan_with(Err(message.to_string()), 0, policy, rules::registry::all())
 }
 
+/// The verdict for an input larger than `max` bytes, not parsed: `ERROR`
+/// with `LIMIT.FILE_BYTES` (CLI: also stdin over its own default cap).
+pub fn size_limit_error(bytes: u64, max: u64, policy: &Policy) -> Verdict {
+    let issue = verdict::issue(
+        IssueCode::LimitFileBytes,
+        format!("input is {bytes} bytes, more than max_file_bytes ({max})"),
+    );
+    Verdict::error(&issue, PolicyInfo::of(policy), bytes)
+}
+
 /// The verdict for a policy that cannot be used — JSON that does not parse,
 /// or (CLI) a policy file that cannot be read: `ERROR` with
 /// `POLICY.INVALID`. `bytes` is the input size, for `stats`.
@@ -140,14 +150,7 @@ fn scan_with(
     }
     let limits = policy.limits();
     if bytes > limits.max_file_bytes {
-        let issue = verdict::issue(
-            IssueCode::LimitFileBytes,
-            format!(
-                "input is {bytes} bytes, more than max_file_bytes ({})",
-                limits.max_file_bytes
-            ),
-        );
-        return Verdict::error(&issue, PolicyInfo::of(policy), bytes);
+        return size_limit_error(bytes, limits.max_file_bytes, policy);
     }
 
     let input = match input {
@@ -397,6 +400,29 @@ mod tests {
         let v = scan(MINIMAL, &policy(r#"{"rules": {"NOPE.X": "off"}}"#));
         assert_eq!(v.errors[0].code, "POLICY.INVALID");
         assert!(v.policy.digest.is_some());
+    }
+
+    /// No size limit by default: an 8 GiB source is not refused up front
+    /// (it is read; this one fails on the first read).
+    #[test]
+    fn no_file_size_limit_by_default() {
+        struct Huge;
+        impl Source for Huge {
+            fn len(&self) -> u64 {
+                8 << 30
+            }
+            fn read_at(&self, _: u64, _: &mut [u8]) -> Result<(), source::ReadError> {
+                Err(source::ReadError("not stored".to_string()))
+            }
+        }
+        let v = scan_source(&Huge, &Policy::default());
+        assert_eq!(v.status, Status::Error);
+        assert_eq!(v.errors[0].code, "ENGINE.READ");
+        let v = scan_source(
+            &Huge,
+            &policy(r#"{"limits": {"max_file_bytes": 4294967296}}"#),
+        );
+        assert_eq!(v.errors[0].code, "LIMIT.FILE_BYTES");
     }
 
     #[test]

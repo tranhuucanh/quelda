@@ -12,8 +12,8 @@ use std::fmt::Write as _;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
-/// Default bench policy: `balanced` with `max_file_bytes` raised so files
-/// over 256 MiB are scanned instead of rejected up front.
+/// Default bench policy: `balanced` with an explicit `max_file_bytes` (4 GiB,
+/// above every bench file; the engine default has no limit).
 pub const DEFAULT_POLICY: &str = r#"{"limits":{"max_file_bytes":4294967296}}"#;
 
 /// Verdict without `stats.duration_ms`, keys sorted (serde_json's default

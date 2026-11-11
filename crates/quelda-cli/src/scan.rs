@@ -8,7 +8,7 @@ use std::path::Path;
 
 use quelda_core::policy::PolicyError;
 use quelda_core::source::FileSource;
-use quelda_core::{Policy, ReadError, Source, Verdict};
+use quelda_core::{Policy, Source, Verdict};
 use sha2::{Digest, Sha256};
 
 use crate::args::{Input, PolicySource, Scan};
@@ -16,12 +16,24 @@ use crate::args::{Input, PolicySource, Scan};
 /// Policy files are small; a larger one is a mistake (wrong path).
 pub const MAX_POLICY_BYTES: u64 = 1 << 20;
 
+/// Most of a stream (stdin, pipe, device) kept in memory when the policy
+/// sets no `limits.max_file_bytes`. Files are read in place and have no
+/// default limit; a stream must be held whole, so an endless one
+/// (`/dev/zero`) would otherwise take all memory.
+pub const STREAM_MAX_BYTES: u64 = 4 << 30;
+
+/// How much of a stream to keep: the policy's `max_file_bytes` if it sets
+/// one, else [`STREAM_MAX_BYTES`].
+fn stream_cap(policy: &Policy) -> u64 {
+    policy.limits.max_file_bytes.unwrap_or(STREAM_MAX_BYTES)
+}
+
 /// Runs one scan of `input`.
 pub fn run(scan: &Scan, input: &Input, stdin: &mut dyn Read) -> Verdict {
     let policy = policy(scan);
     // The input is read even when the policy is invalid, for `stats.bytes`
     // (and so a writer to our stdin is not cut off).
-    let cap = policy.as_ref().map_or(0, |p| p.limits().max_file_bytes);
+    let cap = policy.as_ref().map_or(0, stream_cap);
     let input = load(input, cap, stdin);
     match policy {
         Ok(p) => input.scan(&p),
@@ -37,7 +49,7 @@ pub fn run_with(
     hash: bool,
     stdin: &mut dyn Read,
 ) -> (Verdict, Option<String>) {
-    let input = load(input, policy.limits().max_file_bytes, stdin);
+    let input = load(input, stream_cap(policy), stdin);
     let verdict = input.scan(policy);
     let sha256 = if hash { input.sha256() } else { None };
     (verdict, sha256)
@@ -87,8 +99,9 @@ enum Loaded {
     File(FileSource),
     /// A stream (stdin, pipe, device) read into memory.
     Bytes(Vec<u8>),
-    /// A stream longer than `max_file_bytes`: only its length was kept.
-    Oversized(u64),
+    /// A stream longer than its cap (`stream_cap`): only its length was
+    /// kept.
+    Oversized { len: u64, cap: u64 },
     /// Cannot be read: the message for `ENGINE.READ`.
     Failed(String),
 }
@@ -98,7 +111,7 @@ impl Loaded {
         match self {
             Loaded::File(f) => f.len(),
             Loaded::Bytes(b) => b.len() as u64,
-            Loaded::Oversized(n) => *n,
+            Loaded::Oversized { len, .. } => *len,
             Loaded::Failed(_) => 0,
         }
     }
@@ -107,7 +120,7 @@ impl Loaded {
         match self {
             Loaded::File(f) => quelda_core::scan_source(f, policy),
             Loaded::Bytes(b) => quelda_core::scan(b, policy),
-            Loaded::Oversized(len) => quelda_core::scan_source(&SizeOnly(*len), policy),
+            Loaded::Oversized { len, cap } => quelda_core::size_limit_error(*len, *cap, policy),
             Loaded::Failed(msg) => quelda_core::read_error(msg, policy),
         }
     }
@@ -129,7 +142,7 @@ impl Loaded {
                     offset += n as u64;
                 }
             }
-            Loaded::Oversized(_) | Loaded::Failed(_) => return None,
+            Loaded::Oversized { .. } | Loaded::Failed(_) => return None,
         }
         Some(h.finalize().iter().map(|b| format!("{b:02x}")).collect())
     }
@@ -175,26 +188,9 @@ fn read_stream(r: &mut dyn Read, cap: u64, name: &str) -> Loaded {
         }
     }
     if total > cap {
-        Loaded::Oversized(total)
+        Loaded::Oversized { len: total, cap }
     } else {
         Loaded::Bytes(kept)
-    }
-}
-
-/// A stream that was too large to keep. The engine checks the size before
-/// reading any byte, so `read_at` is never called; if it were, the verdict
-/// would be `ERROR` anyway.
-struct SizeOnly(u64);
-
-impl Source for SizeOnly {
-    fn len(&self) -> u64 {
-        self.0
-    }
-
-    fn read_at(&self, _: u64, _: &mut [u8]) -> Result<(), ReadError> {
-        Err(ReadError(
-            "input not kept: larger than limits.max_file_bytes".to_string(),
-        ))
     }
 }
 
@@ -343,6 +339,40 @@ mod tests {
         assert_ne!(v.errors.first().map(|e| e.code), Some("LIMIT.FILE_BYTES"));
     }
 
+    /// Without `limits.max_file_bytes`, a stream is kept up to
+    /// `STREAM_MAX_BYTES`; past it the verdict is `LIMIT.FILE_BYTES` although
+    /// the engine itself has no limit. A limit set by the policy wins.
+    #[test]
+    fn stream_cap_without_a_policy_limit() {
+        assert_eq!(stream_cap(&Policy::default()), STREAM_MAX_BYTES);
+        let set = Policy::from_json(r#"{"limits":{"max_file_bytes":8589934592}}"#).unwrap();
+        assert_eq!(stream_cap(&set), 8 << 30);
+        let p = Policy::default();
+        let over = Loaded::Oversized {
+            len: STREAM_MAX_BYTES + 1,
+            cap: STREAM_MAX_BYTES,
+        };
+        let v = over.scan(&p);
+        assert_eq!(v.status, Status::Error);
+        assert_eq!(v.errors[0].code, "LIMIT.FILE_BYTES");
+        assert_eq!(
+            v.errors[0].message,
+            format!(
+                "input is {} bytes, more than max_file_bytes ({STREAM_MAX_BYTES})",
+                STREAM_MAX_BYTES + 1
+            )
+        );
+        assert_eq!(v.stats.bytes, STREAM_MAX_BYTES + 1);
+        assert_eq!(over.sha256(), None);
+        // A regular file is not capped: the engine reads it in place.
+        let path = tmp("not-capped.pdf", MINIMAL);
+        let empty = &mut Cursor::new(Vec::new());
+        assert!(matches!(
+            load(&Input::Path(path), 0, empty),
+            Loaded::File(_)
+        ));
+    }
+
     #[test]
     fn read_stream_keeps_up_to_cap() {
         let data = vec![7u8; 150_000];
@@ -352,11 +382,14 @@ mod tests {
         }
         assert!(matches!(
             read_stream(&mut Cursor::new(&data), 149_999, "s"),
-            Loaded::Oversized(150_000)
+            Loaded::Oversized {
+                len: 150_000,
+                cap: 149_999
+            }
         ));
         assert!(matches!(
             read_stream(&mut Cursor::new(&data), 0, "s"),
-            Loaded::Oversized(150_000)
+            Loaded::Oversized { len: 150_000, .. }
         ));
         assert!(
             matches!(read_stream(&mut Cursor::new(b""), 0, "s"), Loaded::Bytes(b) if b.is_empty())
@@ -401,12 +434,6 @@ mod tests {
         let small = Policy::from_json(r#"{"limits":{"max_file_bytes":4}}"#).unwrap();
         let stdin = &mut Cursor::new(MINIMAL.to_vec());
         assert_eq!(run_with(&Input::Stdin, &small, true, stdin).1, None);
-    }
-
-    #[test]
-    fn size_only_never_reads() {
-        assert!(SizeOnly(5).read_at(0, &mut [0; 1]).is_err());
-        assert_eq!(SizeOnly(5).len(), 5);
     }
 
     #[cfg(unix)]

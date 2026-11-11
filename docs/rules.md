@@ -1,6 +1,6 @@
 # Rules
 
-quelda has **40 rules in 11 categories**. Each one looks for one thing that attackers use against
+quelda has **45 rules in 11 categories**. Each one looks for one thing that attackers use against
 PDF readers and server-side PDF tools (Ghostscript, ImageMagick, print RIPs, thumbnailers), or
 that makes different PDF software see different documents. On top of the rules, the engine
 refuses to judge what it cannot fully inspect (see [engine errors](policy.md#engine-errors)).
@@ -50,8 +50,8 @@ PostScript code hidden inside a PDF, which Ghostscript-based tools may execute.
 
 | Rule | Catches | strict | balanced | permissive |
 |---|---|---|---|---|
-| `POSTSCRIPT.CONTENT_OP` 🔒 | The `PS` operator in any content stream (pages, forms, appearances, Type 3 glyphs): raw PostScript handed to the interpreter. | block | block | block |
-| `POSTSCRIPT.TYPE4_FUNCTION` | Type 4 (calculator) functions that use anything beyond the 42 operators allowed by the PDF spec. Plain colour functions from Illustrator or InDesign pass. | block | block | block |
+| `POSTSCRIPT.CONTENT_OP` 🔒 | The `PS` operator in any content stream (pages, forms, appearances, Type 3 glyphs) or form default-appearance string (`/DA`): raw PostScript handed to the interpreter. | block | block | block |
+| `POSTSCRIPT.TYPE4_FUNCTION` | Type 4 (calculator) functions that use anything beyond the 42 operators allowed by the PDF spec, or that are oversized or nested too deep. Plain colour functions from Illustrator or InDesign pass. | block | block | block |
 | `POSTSCRIPT.XOBJECT` 🔒 | PostScript XObjects and forms with a PostScript alternate: PostScript code that Ghostscript may execute. | block | block | block |
 
 ## Active content (`active_content`)
@@ -84,7 +84,9 @@ Ways a document reaches out to the network or to other files.
 | Rule | Catches | strict | balanced | permissive |
 |---|---|---|---|---|
 | `EXTERNAL.IMPORT_DATA` | Forms that load their values from an external file. | block | warn | off |
+| `EXTERNAL.OPI` | OPI comments on an image or form: prepress software swaps the content for a file on its own disk or network, named by the PDF. Modern tools do not write them. | block | block | warn |
 | `EXTERNAL.REMOTE_GOTO` | Links that open another document, possibly over the network (UNC/SMB paths leak Windows credentials), or an attachment. | block | warn | off |
+| `EXTERNAL.STREAM_FILE` | Images or other content read from a file outside the PDF (external streams, reference XObjects): a renderer opens a path or URL chosen by the file, and what prints is not what was checked. Real print files embed their images. | block | block | warn |
 | `EXTERNAL.SUBMIT_FORM` | Forms that send their data (or the whole document) to a URL: data exfiltration and phishing. | block | warn | off |
 | `EXTERNAL.URI` | Web links. Common in normal documents (so `balanced` only warns), and what phishing documents rely on. | block | warn | off |
 | `EXTERNAL.URL_FILESPEC` | File references that point at a URL, so the file is fetched from the network. | block | warn | off |
@@ -117,7 +119,9 @@ Damaged, ambiguous or unusual file structure: where different PDF readers start 
 | `STRUCT.INCREMENTAL_UPDATE` | The file was edited after it was created (incremental updates). quelda already scans every revision; this only reports that there are several. | warn | off | off |
 | `STRUCT.MISSING_EOF` | No `%%EOF` at all: a truncated or hand-crafted file that readers repair differently. | block | warn | off |
 | `STRUCT.MULTIPLE_HEADERS` | More than one `%PDF-` header: concatenated files, or a file built to look different from the front and from the back. | block | warn | off |
+| `STRUCT.NAME_TOO_LONG` | Names longer than 127 bytes (the PDF limit readers build for): long font names have overflowed buffers in renderers. Producers never write them. | block | block | block |
 | `STRUCT.PAGE_TREE_CYCLE` | Loops or repeated nodes in the page tree, which make naive readers loop forever or render a few objects as millions of pages. | block | warn | off |
+| `STRUCT.PRINT_VIEW_MISMATCH` | Content that prints but is hidden on screen (annotations flagged print-only, layers ON for print and OFF for view): what is approved on screen is not what is printed. Some real files have print-only stamps, so `balanced` only warns. | block | warn | off |
 | `STRUCT.TRAILING_DATA` | More than `thresholds.max_trailing_bytes` of data after the last `%%EOF`: how polyglots and smuggled payloads are usually built. | block | warn | off |
 | `STRUCT.TRUNCATED_STREAM` | Compressed data that stops early. Common from careless producers; quelda inspects exactly what a reader would show. | block | warn | off |
 | `STRUCT.XREF_MISMATCH` | The cross-reference table does not match the file (wrong offsets, unlisted or hidden objects, no usable xref, broken chains). Readers then repair the file each in their own way: the classic trick to show a scanner one document and a reader another. | block | warn | off |
@@ -136,6 +140,7 @@ Decoders with a history of exploits.
 
 | Rule | Catches | strict | balanced | permissive |
 |---|---|---|---|---|
+| `CODEC.DECODE_PARAMS` | Decoder parameters outside the spec (predictor, colours, bits per component, columns, rows): decoders size their buffers from them, and out-of-range values have caused overflows. Real files pass. | block | block | block |
 | `CODEC.JBIG2` | Images compressed with JBIG2, whose decoders were exploited in the wild (FORCEDENTRY, CVE-2009-0658). | block | warn | off |
 | `CODEC.JPX` | Images compressed with JPEG 2000, whose decoders have a long history of memory-safety bugs. | block | warn | off |
 | `CODEC.TYPE1_FONT` | Embedded Type 1 (PostScript) font programs. Off in `balanced` because print files use them a lot. | warn | off | off |

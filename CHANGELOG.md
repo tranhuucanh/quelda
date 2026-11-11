@@ -22,8 +22,35 @@ match more files, is listed under **Rules** because it can change verdicts.
   works as before.
 - npm README: scanning a whole folder picked in the browser.
 
+### Rules
+
+Five new rules (45 in all) and one rule that now looks in more places. On the
+real files we test with, no verdict changed in any preset.
+
+- `EXTERNAL.STREAM_FILE` (new; block in strict and balanced, warn in permissive):
+  images or other content read from a file outside the PDF (a stream with `/F`,
+  `/FFilter` or `/FDecodeParms`, or a reference XObject).
+- `EXTERNAL.OPI` (new; block, block, warn): OPI comments that make prepress
+  software swap an image for a file it reads from its own disk or network.
+- `STRUCT.NAME_TOO_LONG` (new; blocks in every preset): a name longer than the
+  127 bytes readers are built for (long font names have overflowed renderer
+  buffers).
+- `CODEC.DECODE_PARAMS` (new; blocks in every preset): decoder parameters outside
+  the spec (`/Predictor`, `/Colors`, `/BitsPerComponent`, `/Columns`, `/Rows`, …).
+- `STRUCT.PRINT_VIEW_MISMATCH` (new; block, warn, off): content that prints but
+  is hidden on screen (print-only annotations or layers).
+- `POSTSCRIPT.CONTENT_OP` (locked) also checks default appearance strings
+  (`/DA` of forms, fields and free-text annotations).
+
 ### Changed
 
+- No file size limit by default: `limits.max_file_bytes` was 256 MiB and now has
+  no default, so a file of any size is scanned (files are read in place, so a
+  1 GB file takes under a second and a few MB of memory). Set
+  `limits.max_file_bytes` in the policy to bring a limit back.
+- CLI: input from stdin or a pipe is read into memory, so it stops at 4 GiB
+  (`LIMIT.FILE_BYTES`, exit 2) when the policy sets no `limits.max_file_bytes`.
+  Files given by path have no such cap.
 - CLI `--format text`: the status is padded so that file names line up
   (`PASS    a.pdf`), and control characters in file names and messages are
   escaped (`\u{1b}`) so a file cannot drive the terminal.
