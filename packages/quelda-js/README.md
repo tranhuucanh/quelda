@@ -11,10 +11,7 @@ invalid, with a reason for each rule the file breaks. It never renders or previe
   [Every setup below](#works-with) is tested in a real browser.
 - **40 rules, fail-closed**: anything it cannot fully inspect is invalid.
 - **Fast and light**: files are read in place, never loaded whole; a 1 GB file of images scans
-  in under a second with a few MB of engine memory.
-
-> **Status:** first release (0.x). The verdict format and rule IDs are stable; defaults may
-> still be tuned. See the [changelog](https://github.com/tranhuucanh/quelda/blob/main/CHANGELOG.md).
+  in under a second with a few MB of engine memory ([numbers](#speed-and-memory)).
 
 > **The browser is not a security boundary.** A check in the browser gives users instant
 > feedback and saves a pointless upload, but anyone can skip it and send a file straight to
@@ -150,10 +147,12 @@ Vue, Svelte, Angular and others work the same way: create the scanner once (on m
 </script>
 ```
 
-Pin a version in production (`…/npm/quelda@X.Y.Z/dist/index.js`, the version from
-`npm view quelda version`) so a new release cannot change your verdicts unannounced. The
-package starts its worker from the CDN by itself; the CDN must send CORS headers (jsDelivr and
-unpkg do).
+Public npm CDNs such as [jsDelivr](https://www.jsdelivr.com/package/npm/quelda) and
+[unpkg](https://unpkg.com/quelda/) serve every package published to npm automatically: nothing
+to set up, the URL works as soon as a version is on npm. Pin a version in production
+(`…/npm/quelda@X.Y.Z/dist/index.js`, the version from `npm view quelda version`) so a new
+release cannot change your verdicts unannounced. The package starts its worker from the CDN by
+itself. To serve the files from your own server instead, see [No bundler](#works-with).
 
 ## Works with
 
@@ -200,8 +199,7 @@ CDN in `script-src` and `connect-src`.
 ## What quelda checks
 
 **40 rules in 11 categories**, plus 12 engine safeguards that refuse to judge what cannot be
-fully inspected. Every rule, what it catches and its action in each preset:
-[rules.md](https://github.com/tranhuucanh/quelda/blob/main/docs/rules.md).
+fully inspected. Full list with explanations: [docs/rules.md](https://github.com/tranhuucanh/quelda/blob/main/docs/rules.md).
 
 | Category | Rules | Catches, for example |
 |---|---|---|
@@ -217,43 +215,49 @@ fully inspected. Every rule, what it catches and its action in each preset:
 | `codecs` | 3 | JBIG2 (FORCEDENTRY), JPEG 2000, Type 1 fonts |
 | `resource` | 3 | Pixel bombs, gigantic or broken pages, page-count bombs |
 
-The safeguards stop compression bombs, absurd nesting, object floods, endless revision chains
-and crafted overlapping objects: such a file is `ERROR` (invalid), never a frozen tab.
-Obfuscation does not help: names, strings and streams are decoded before any rule looks at
-them, and every object of every revision is scanned. Each release is tested against 449
-generated attack, look-alike and damaged files, and must give exactly the verdict of the native
-engine on every one.
+**Why 40 rules but hundreds of test files?** A rule is one thing to catch ("JavaScript"), and
+there are many ways to hide each one. The test suite generates **449 PDF files**: 327 attack
+variants (each rule has several: other encodings, other locations, old revisions, object
+streams, …), 91 clean look-alikes that must *not* trigger a rule, and clean, damaged and
+disguised files. Each is checked against the exact verdict of all three presets, plus 47
+policy cases, on every build: the CLI, the WebAssembly package and the Rust library must agree
+on every one. The engine is also fuzzed and run on a corpus of real-world PDFs.
 
-### Supported files
+How strict it is depends on the [policy](https://github.com/tranhuucanh/quelda/blob/main/docs/policy.md): three presets (`strict`, `balanced`,
+`permissive`), then per-category and per-rule changes. A policy adjusts a preset; every rule
+always runs.
+
+## Speed and memory
+
+Scan time and engine memory of the WebAssembly engine on an Apple M2 Pro (Node 22, a `File`
+read in place; files over 256 MiB need `limits.max_file_bytes` raised):
+
+| File | Size | Time | Engine memory |
+|---|---:|---:|---:|
+| Real-world brochure | 54 MB | 0.06 s | 2.4 MB |
+| Images only | 50 MB | 0.04 s | 2.4 MB |
+| Images only | 200 MB | 0.14 s | 2.4 MB |
+| Images only | 1 GB | 0.8 s | 2.4 MB |
+
+A file is heavy because of its structure, not its size: many objects, deep nesting, page
+content that must be decompressed. quelda handles files far heavier than real documents:
+
+| Heavy file | Size | Time | Engine memory | Verdict |
+|---|---:|---:|---:|---|
+| 900,000 objects | 62 MB | 1.9 s | 284 MB | PASS |
+| 505,000 objects in 5,000 compressed object streams | 10 MB | 1.1 s | 246 MB | PASS |
+| 10,000 objects nested 120 levels deep | 18 MB | 0.73 s | 126 MB | PASS |
+| 200,000 objects full of `#xx` escapes | 33 MB | 0.55 s | 112 MB | PASS |
+| 999 incremental updates, 100,000 objects | 7 MB | 0.20 s | 34 MB | PASS |
+| 4 page streams, 480 MiB once decompressed | 53 MB | 3.7 s | 271 MB | PASS |
+| Arrays nested 100,000 levels deep (parser crash attack) | 0.2 MB | < 0.01 s | 1.6 MB | ERROR |
+
+## Supported files
 
 Files are identified by content, not by extension. **PDF** and **modern `.ai` files**
 (Illustrator 9 and later, which are PDF inside) are scanned. **PostScript, EPS and legacy `.ai`**
 (Illustrator 8 and earlier) are always rejected with `FILETYPE.POSTSCRIPT_MAGIC`, a locked rule:
 PostScript is a programming language and cannot be proven safe by a scan.
-
-## Speed and memory
-
-A file is not heavy because it is big: images, fonts and attachments are never decompressed, so
-a 1 GB file of photos is quick. What costs time and memory is structure: objects, nesting, and
-the page content that must be decompressed to be inspected.
-
-The engine on an Apple M2 Pro (Node 22, `File`-style reading in place):
-
-| File | Size | What is inside | Time | Engine memory | Verdict |
-|---|---:|---|---:|---:|---|
-| Images only | 50 MB | a few objects, opaque data | 0.04 s | 2.4 MB | PASS |
-| Images only ¹ | 1 GB | a few objects, opaque data | 0.8 s | 2.4 MB | PASS |
-| Huge page content | 53 MB | 4 page streams, 480 MiB once decompressed | 3.7 s | 271 MB | PASS |
-| Object flood | 62 MB | 900,000 objects | 1.9 s | 284 MB | PASS |
-| Object streams | 10 MB | 505,000 objects in 5,000 compressed object streams | 1.1 s | 246 MB | PASS |
-| Deep and long | 18 MB | 10,000 objects nested 120 levels deep | 0.7 s | 126 MB | PASS |
-| Nesting attack | 0.2 MB | arrays nested 100,000 levels deep | < 1 ms | 1.6 MB | ERROR `LIMIT.NESTING_DEPTH` |
-
-¹ Over the default `max_file_bytes` (256 MiB), raised for this run.
-
-Arrays and dictionaries are followed up to 128 levels deep by default (`limits.max_nesting_depth`,
-up to 512); deeper is a known way to crash parsers, so quelda stops there instead. Real
-documents are far lighter than these test files: typical uploads scan in tens of milliseconds.
 
 ## API
 

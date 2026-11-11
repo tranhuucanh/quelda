@@ -589,16 +589,15 @@ fn readme_test_counts_match_the_fixtures() {
                 .is_some_and(|x| x == "json")
         })
         .count();
-    let md = read("README.md");
-    for quoted in [
-        format!("**{} PDF files**", files.len()),
-        format!("{} attack\nvariants", count("/bad/")),
-        format!("{} clean look-alikes", count("/good/")),
-        format!("plus {conformance}\npolicy cases"),
-    ] {
-        assert!(md.contains(&quoted), "README.md: {quoted:?}");
+    for doc in ["README.md", "packages/quelda-js/README.md"] {
+        let md = read(doc);
+        for quoted in [
+            format!("**{} PDF files**", files.len()),
+            format!("{} attack\nvariants", count("/bad/")),
+            format!("{} clean look-alikes", count("/good/")),
+            format!("plus {conformance}\npolicy cases"),
+        ] {
+            assert!(md.contains(&quoted), "{doc}: {quoted:?}");
+        }
     }
-    let npm = read("packages/quelda-js/README.md");
-    let quoted = format!("tested against {}\ngenerated", files.len());
-    assert!(npm.contains(&quoted), "npm README: {quoted:?}");
 }

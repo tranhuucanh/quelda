@@ -1,12 +1,10 @@
 # quelda
 
-quelda checks **PDF files and Adobe Illustrator (`.ai`) files** for attacks before they reach
-your server. You give it one file and a policy; it returns a verdict: valid or invalid, with a
-reason for each rule the file breaks. It never renders or previews the file.
-
-Its main job is to stop files that attack PDF pipelines (Ghostscript, ImageMagick, print RIPs,
-thumbnailers): PostScript/EPS disguised as PDF, embedded PostScript, JavaScript, Launch actions,
-compression bombs and tampered structure.
+quelda checks **PDF files and Adobe Illustrator (`.ai`) files** for attacks. Run it **in the
+browser**, to refuse a bad file before it is even uploaded, and **on your server**, before a
+file reaches Ghostscript, ImageMagick, a print RIP or a thumbnailer. It stops PostScript/EPS
+disguised as PDF, embedded PostScript, JavaScript, Launch actions, compression bombs and
+tampered structure, and says which rule each file breaks.
 
 One Rust engine, two forms, the same verdicts:
 
@@ -15,9 +13,6 @@ One Rust engine, two forms, the same verdicts:
 - **WebAssembly on npm**: [`quelda`](https://www.npmjs.com/package/quelda) scans files right in
   the browser, in a Web Worker, before the upload. Works with Vite, webpack, esbuild, a plain
   `<script type="module">` or straight from a CDN. See [In the browser](#in-the-browser).
-
-> **Status:** first release (0.x). The verdict format and rule IDs are stable; defaults may
-> still be tuned. See the [changelog](CHANGELOG.md).
 
 ## What quelda checks
 
@@ -38,13 +33,6 @@ fully inspected. Full list with explanations: [docs/rules.md](docs/rules.md).
 | `codecs` | 3 | JBIG2 (FORCEDENTRY), JPEG 2000, Type 1 fonts |
 | `resource` | 3 | Pixel bombs, gigantic or broken pages, page-count bombs |
 
-The engine safeguards stop compression bombs, absurd nesting, object floods, endless revision
-chains and crafted overlapping objects, and reject damaged data that must be inspected: such a
-file is `ERROR` (invalid), never silently passed. Obfuscation does not help an attacker: names
-(`/J#61vaScript`), strings (hex, UTF-16) and streams (Flate, LZW, ASCII85, …, stacked) are
-decoded before any rule looks at them, and every object of every revision is scanned, including
-objects hidden from the cross-reference table or packed in compressed object streams.
-
 **Why 40 rules but hundreds of test files?** A rule is one thing to catch ("JavaScript"), and
 there are many ways to hide each one. The test suite generates **449 PDF files**: 327 attack
 variants (each rule has several: other encodings, other locations, old revisions, object
@@ -59,43 +47,28 @@ always runs.
 
 ## Speed and memory
 
-A file is not "heavy" because it is big. Images, fonts and attachments are never decompressed
-(they are not needed to judge the file), so a 1 GB file of photos is quick. What costs time and
-memory is **structure**: the number of objects, how deeply they nest, and the page content or
-object streams that must be decompressed to be inspected.
+Scan time and peak memory of the CLI on an Apple M2 Pro (files over 256 MiB need
+`limits.max_file_bytes` raised):
 
-CLI on an Apple M2 Pro, one file per run, peak memory of the whole process:
+| File | Size | Time | Peak memory |
+|---|---:|---:|---:|
+| Real-world brochure | 54 MB | 0.02 s | 3 MB |
+| Images only | 50 MB | 0.02 s | 3 MB |
+| Images only | 200 MB | 0.09 s | 3 MB |
+| Images only | 1 GB | 0.44 s | 3 MB |
 
-| File | Size | What is inside | Time | Peak memory | Verdict |
-|---|---:|---|---:|---:|---|
-| Real-world brochure | 54 MB | 19 objects, mostly images | 0.02 s | 3 MB | PASS |
-| Images only | 50 MB | a few objects, opaque data | 0.02 s | 3 MB | PASS |
-| Images only | 200 MB | a few objects, opaque data | 0.09 s | 3 MB | PASS |
-| Images only ¹ | 1 GB | a few objects, opaque data | 0.44 s | 3 MB | PASS |
-| Huge page content | 53 MB | 4 page streams, 480 MiB once decompressed | 3.0 s | 290 MB | PASS |
-| Object flood | 62 MB | 900,000 objects | 1.5 s | 443 MB | PASS |
-| Object streams | 10 MB | 505,000 objects in 5,000 compressed object streams | 0.84 s | 333 MB | PASS |
-| Deep and long | 18 MB | 10,000 objects nested 120 levels deep | 0.55 s | 218 MB | PASS |
-| Escaped names | 33 MB | 200,000 objects full of `#xx` escapes | 0.44 s | 164 MB | PASS |
-| Many revisions | 7 MB | 999 incremental updates, 100,000 objects | 0.17 s | 57 MB | PASS |
-| Nesting attack | 0.2 MB | arrays nested 100,000 levels deep | < 0.01 s | 2 MB | ERROR `LIMIT.NESTING_DEPTH` |
+A file is heavy because of its structure, not its size: many objects, deep nesting, page
+content that must be decompressed. quelda handles files far heavier than real documents:
 
-¹ Over the default `max_file_bytes` (256 MiB), raised for this run.
-
-Notice the 10 MB file with 505,000 objects taking longer than the 1 GB one: size says little.
-
-**Nesting.** quelda follows arrays and dictionaries nested up to **128 levels** by default
-(`limits.max_nesting_depth`, up to 512), far deeper than real documents use. Deeper nesting is a
-known way to crash parsers with a stack overflow; quelda stops at the limit instead, so the
-100,000-level file above is rejected in under a millisecond with 2 MB of memory.
-
-**Bounded.** Every scan is capped by [limits](docs/policy.md#limits) (file size, object count,
-revisions, decompressed bytes, compression ratio) that you can tune. A file that would need
-more is `ERROR`, never a crash or a hang.
-
-**In the browser** (the WebAssembly engine, measured in Node 22): the 1 GB file in 0.8 s with
-2.4 MB of engine memory (files are read in place, never loaded whole); 900,000 objects in 1.9 s
-with 284 MB.
+| Heavy file | Size | Time | Peak memory | Verdict |
+|---|---:|---:|---:|---|
+| 900,000 objects | 62 MB | 1.5 s | 443 MB | PASS |
+| 505,000 objects in 5,000 compressed object streams | 10 MB | 0.84 s | 333 MB | PASS |
+| 10,000 objects nested 120 levels deep | 18 MB | 0.55 s | 218 MB | PASS |
+| 200,000 objects full of `#xx` escapes | 33 MB | 0.44 s | 164 MB | PASS |
+| 999 incremental updates, 100,000 objects | 7 MB | 0.17 s | 57 MB | PASS |
+| 4 page streams, 480 MiB once decompressed | 53 MB | 3.0 s | 290 MB | PASS |
+| Arrays nested 100,000 levels deep (parser crash attack) | 0.2 MB | < 0.01 s | 2 MB | ERROR |
 
 ## Install
 
