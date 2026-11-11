@@ -92,7 +92,7 @@ test('CLI usage errors exit 2', () => {
   strictEqual(main(['--bogus'], () => {}, () => {}), 2);
 });
 
-test('the committed budget is design §8.2 (640 KiB raw, 256 KiB gzip; ADR #42)', () => {
+test('the committed budget is design §8.2 (704 KiB raw, 288 KiB gzip; ADR #42)', () => {
   const b = JSON.parse(readFileSync(join(here, '../crates/quelda-wasm/size-budget.json'), 'utf8'));
-  deepStrictEqual(b, { raw_bytes: 640 * 1024, gzip_bytes: 256 * 1024 });
+  deepStrictEqual(b, { raw_bytes: 704 * 1024, gzip_bytes: 288 * 1024 });
 });

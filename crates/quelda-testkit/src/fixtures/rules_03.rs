@@ -542,6 +542,590 @@ fn signature_modified() -> Vec<Fixture> {
     ]
 }
 
+const XFA_SCRIPT: &str = "ACTIVE.XFA_SCRIPT";
+const DANGEROUS_URI: &str = "ACTIVE.DANGEROUS_URI";
+const XML_REF: &str = "XML.EXTERNAL_REFERENCE";
+const DRAW_LOOP: &str = "RESOURCE.DRAW_RECURSION";
+const FUNCTION_SIZE: &str = "RESOURCE.FUNCTION_SIZE";
+const XFA: &str = "FORMS.XFA";
+const ACROFORM: &str = "FORMS.ACROFORM";
+const URI: &str = "EXTERNAL.URI";
+const OPEN_ACTION: &str = "ACTIVE.OPEN_ACTION";
+
+/// An XFA template with `inner` in a field.
+fn template(inner: &str) -> String {
+    format!(
+        "<template xmlns=\"http://www.xfa.org/schema/xfa-template/3.3/\"><subform name=\"form1\"><field name=\"a\">{inner}</field></subform></template>"
+    )
+}
+
+const ALERT: &str = "<event activity=\"initialize\"><script contentType=\"application/x-javascript\">app.alert(\"quelda-test\");</script></event>";
+
+/// Base doc + an AcroForm (object 10) whose `/XFA` holds template stream 11
+/// and datasets stream 12.
+fn xfa_builder(tpl: &[u8], datasets: &[u8], filters: &[Filter]) -> PdfBuilder {
+    let mut doc = Doc::new();
+    doc.catalog_extra = "/AcroForm 10 0 R".to_string();
+    let mut b = doc.builder();
+    b.object(
+        10,
+        "<< /Fields [] /XFA [(template) 11 0 R (datasets) 12 0 R] >>",
+    )
+    .stream(11, "", tpl, filters)
+    .stream(12, "", datasets, &[]);
+    b
+}
+
+const DATASETS: &[u8] = b"<xfa:datasets xmlns:xfa=\"http://www.xfa.org/schema/xfa-data/1.0/\"><xfa:data><form1><a>1</a></form1></xfa:data></xfa:datasets>";
+
+fn xfa(tpl: &str) -> Vec<u8> {
+    xfa_builder(tpl.as_bytes(), DATASETS, &[]).build()
+}
+
+fn utf16be(s: &str) -> Vec<u8> {
+    [0xFE, 0xFF]
+        .into_iter()
+        .chain(s.encode_utf16().flat_map(u16::to_be_bytes))
+        .collect()
+}
+
+fn xfa_script() -> Vec<Fixture> {
+    let forms = &[XFA, ACROFORM];
+    vec![
+        bad(XFA_SCRIPT, "javascript-event", xfa(&template(ALERT)), forms, "JavaScript run when the form initializes"),
+        bad(
+            XFA_SCRIPT,
+            "formcalc",
+            xfa(&template("<calculate><script>$.rawValue = 1</script></calculate>")),
+            forms,
+            "FormCalc calculation script (the default language)",
+        ),
+        bad(
+            XFA_SCRIPT,
+            "cdata",
+            xfa(&template("<event activity=\"click\"><script contentType=\"application/x-javascript\"><![CDATA[app.alert(1)]]></script></event>")),
+            forms,
+            "Script inside a CDATA section",
+        ),
+        bad(
+            XFA_SCRIPT,
+            "prefixed-element",
+            xfa(&template("<event><t:script xmlns:t=\"http://www.xfa.org/schema/xfa-template/3.3/\">app.alert(1)</t:script></event>")),
+            forms,
+            "Script element with a namespace prefix",
+        ),
+        bad(
+            XFA_SCRIPT,
+            "flate",
+            xfa_builder(template(ALERT).as_bytes(), DATASETS, &[Filter::Flate]).build(),
+            forms,
+            "Template stream Flate-compressed",
+        ),
+        bad(
+            XFA_SCRIPT,
+            "utf16",
+            xfa_builder(&utf16be(&template(ALERT)), DATASETS, &[]).build(),
+            forms,
+            "Template in UTF-16 (with a byte order mark)",
+        ),
+        bad(
+            XFA_SCRIPT,
+            "single-stream",
+            {
+                let mut doc = Doc::new();
+                doc.catalog_extra = "/AcroForm << /Fields [] /XFA 11 0 R >>".to_string();
+                let mut b = doc.builder();
+                let xdp = format!("<xdp:xdp xmlns:xdp=\"http://ns.adobe.com/xdp/\">{}</xdp:xdp>", template(ALERT));
+                b.stream(11, "", xdp.as_bytes(), &[]);
+                b.build()
+            },
+            forms,
+            "Whole XDP as one stream (`/XFA 11 0 R`)",
+        ),
+        bad(
+            XFA_SCRIPT,
+            "string-packet",
+            {
+                let mut doc = Doc::new();
+                doc.catalog_extra = format!(
+                    "/AcroForm << /Fields [] /XFA [(template) {}] >>",
+                    hex(template("<script>x = 1</script>").as_bytes())
+                );
+                doc.build()
+            },
+            forms,
+            "Template written as a (hex) string in the `/XFA` array",
+        ),
+        good(
+            XFA_SCRIPT,
+            "empty-scripts",
+            xfa(&template("<event activity=\"click\"><script contentType=\"application/x-javascript\"/></event><calculate><script>  </script></calculate>")),
+            forms,
+            "Empty `<script>` elements a form designer leaves in the template",
+        ),
+        good(
+            XFA_SCRIPT,
+            "static-form",
+            xfa(&template("<ui><textEdit/></ui><caption><value><text>Name</text></value></caption>")),
+            forms,
+            "XFA form without scripts",
+        ),
+        good(
+            XFA_SCRIPT,
+            "escaped-in-data",
+            xfa_builder(
+                template("<ui><textEdit/></ui>").as_bytes(),
+                b"<xfa:datasets><xfa:data><form1><a>&lt;script&gt;app.alert(1)&lt;/script&gt;</a></form1></xfa:data></xfa:datasets>",
+                &[],
+            )
+            .build(),
+            forms,
+            "Form data containing the escaped text `<script>`",
+        ),
+        good(
+            XFA_SCRIPT,
+            "not-xfa",
+            {
+                let mut b = Doc::new().builder();
+                b.stream(11, "", template(ALERT).as_bytes(), &[]);
+                b.build()
+            },
+            &[],
+            "A script-like XML stream nothing names as XFA",
+        ),
+    ]
+}
+
+/// `s` as a PDF hex string.
+fn hex(s: &[u8]) -> String {
+    let digits: String = s.iter().map(|b| format!("{b:02X}")).collect();
+    format!("<{digits}>")
+}
+
+/// Base doc + a link annotation (object 10) to `uri` (a PDF string).
+fn link(uri: &str) -> Vec<u8> {
+    let mut doc = Doc::new();
+    doc.annots = vec![10];
+    let mut b = doc.builder();
+    b.object(
+        10,
+        format!("<< /Type /Annot /Subtype /Link /Rect [72 700 300 720] /Border [0 0 0] /A << /S /URI /URI {uri} >> >>"),
+    );
+    b.build()
+}
+
+fn dangerous_uri() -> Vec<Fixture> {
+    let uri = &[URI];
+    let bad_link = |variant: &str, target: &[u8], what: &str| {
+        bad(DANGEROUS_URI, variant, link(&hex(target)), uri, what)
+    };
+    let good_link = |variant: &str, target: &[u8], what: &str| {
+        good(DANGEROUS_URI, variant, link(&hex(target)), uri, what)
+    };
+    vec![
+        bad_link(
+            "javascript",
+            b"javascript:app.alert('quelda-test')",
+            "`javascript:` link",
+        ),
+        bad_link(
+            "javascript-obfuscated",
+            b" \x01JaVa\tScRiPt:app.alert(1)",
+            "`javascript:` with a leading control character, mixed case and a tab",
+        ),
+        bad_link(
+            "vbscript",
+            b"vbscript:msgbox(\"quelda-test\")",
+            "`vbscript:` link",
+        ),
+        bad_link("data", b"data:text/plain,quelda-test", "`data:` URL"),
+        bad_link("file", b"File:quelda-test.pdf", "`file:` link (any case)"),
+        bad_link(
+            "unc",
+            b"\\\\example.invalid\\quelda-test\\x.pdf",
+            "UNC path to a network share (NTLM leak)",
+        ),
+        bad_link(
+            "windows-path",
+            b"C:\\quelda-test\\x.pdf",
+            "Local Windows path",
+        ),
+        bad_link(
+            "ms-msdt",
+            b"ms-msdt:quelda-test",
+            "`ms-msdt:` protocol handler (Follina)",
+        ),
+        bad_link(
+            "search-ms",
+            b"search-ms:query=quelda-test",
+            "`search-ms:` protocol handler",
+        ),
+        bad(
+            DANGEROUS_URI,
+            "utf16",
+            link(&hex(&utf16be("javascript:app.alert(1)"))),
+            uri,
+            "`javascript:` link written in UTF-16",
+        ),
+        bad(
+            DANGEROUS_URI,
+            "indirect",
+            {
+                let mut doc = Doc::new();
+                doc.annots = vec![10];
+                let mut b = doc.builder();
+                b.object(10, "<< /Type /Annot /Subtype /Link /Rect [72 700 300 720] /A << /S /URI /URI 11 0 R >> >>")
+                    .object(11, "(javascript:app.alert\\(1\\))");
+                b.build()
+            },
+            uri,
+            "`/URI` value through an indirect reference",
+        ),
+        bad(
+            DANGEROUS_URI,
+            "open-action",
+            {
+                let mut doc = Doc::new();
+                doc.catalog_extra =
+                    "/OpenAction << /S /URI /URI (file:quelda-test.pdf) >>".to_string();
+                doc.build()
+            },
+            &[URI, OPEN_ACTION],
+            "`file:` URI action run when the document opens",
+        ),
+        good_link(
+            "https",
+            b"https://example.invalid/docs/a.pdf",
+            "Ordinary web link",
+        ),
+        good_link(
+            "mailto",
+            b"mailto:quelda-test@example.invalid",
+            "E-mail link",
+        ),
+        good_link("ftp", b"ftp:quelda-test", "FTP link"),
+        good_link("tel", b"tel:+0000", "Phone link"),
+        good_link("relative", b"chapter2.html#intro", "Relative link"),
+        good_link(
+            "javascript-in-query",
+            b"https://example.invalid/?next=javascript:x",
+            "`javascript:` inside the query of a web link",
+        ),
+    ]
+}
+
+/// Base doc + catalog `/Metadata 10 0 R`, an XMP stream.
+fn xmp(packet: &[u8], filters: &[Filter]) -> Vec<u8> {
+    let mut doc = Doc::new();
+    doc.catalog_extra = "/Metadata 10 0 R".to_string();
+    let mut b = doc.builder();
+    b.stream(10, "/Type /Metadata /Subtype /XML", packet, filters);
+    b.build()
+}
+
+const XMP_OPEN: &str = "<?xpacket begin=\"\" id=\"W5M0MpCehiHzreSzNTczkc9d\"?><x:xmpmeta xmlns:x=\"adobe:ns:meta/\"><rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\"><rdf:Description rdf:about=\"\" xmlns:dc=\"http://purl.org/dc/elements/1.1/\">";
+const XMP_CLOSE: &str = "</rdf:Description></rdf:RDF></x:xmpmeta><?xpacket end=\"w\"?>";
+
+fn xmp_with(inner: &str) -> String {
+    format!("{XMP_OPEN}{inner}{XMP_CLOSE}")
+}
+
+fn xml_external_reference() -> Vec<Fixture> {
+    let include = xmp_with(
+        "<dc:title xmlns:xi=\"http://www.w3.org/2001/XInclude\"><xi:include href=\"quelda-test.txt\" parse=\"text\"/></dc:title>",
+    );
+    let stylesheet = format!(
+        "<?xml-stylesheet type=\"text/xsl\" href=\"quelda-test.xsl\"?>{}",
+        xmp_with("")
+    );
+    vec![
+        bad(XML_REF, "xinclude", xmp(include.as_bytes(), &[]), &[], "XInclude of a file in XMP metadata"),
+        bad(XML_REF, "xml-stylesheet", xmp(stylesheet.as_bytes(), &[]), &[], "Stylesheet instruction in XMP metadata"),
+        bad(XML_REF, "flate", xmp(include.as_bytes(), &[Filter::Flate]), &[], "XInclude in Flate-compressed metadata"),
+        bad(XML_REF, "utf16", xmp(&utf16be(&include), &[]), &[], "XInclude in UTF-16 metadata"),
+        bad(
+            XML_REF,
+            "xfa-web-service",
+            xfa_builder(
+                b"<connectionSet xmlns=\"http://www.xfa.org/schema/xfa-connection-set/2.8/\"><wsdlConnection dataDescription=\"d\" name=\"svc\"><soapAddress>https://example.invalid/quelda-test</soapAddress></wsdlConnection></connectionSet>",
+                DATASETS,
+                &[],
+            )
+            .build(),
+            &[XFA, ACROFORM],
+            "XFA web service connection",
+        ),
+        good(XML_REF, "plain-xmp", xmp(xmp_with("<dc:format>application/pdf</dc:format>").as_bytes(), &[]), &[], "Ordinary XMP: namespace URIs only"),
+        good(XML_REF, "include-without-namespace", xmp(xmp_with("<dc:title><include>chapter</include></dc:title>").as_bytes(), &[]), &[], "An element named `include` that is not XInclude"),
+        good(
+            XML_REF,
+            "xfa-schema-connection",
+            xfa_builder(b"<connectionSet><xsdConnection dataDescription=\"d\" name=\"s\"/></connectionSet>", DATASETS, &[]).build(),
+            &[XFA, ACROFORM],
+            "XFA schema connection (no web service)",
+        ),
+    ]
+}
+
+/// Base doc whose page draws `/Fm0` (object 10), plus `objects`.
+fn drawing(objects: impl FnOnce(&mut PdfBuilder)) -> Vec<u8> {
+    let mut doc = Doc::new();
+    doc.xobjects = vec![("Fm0", 10)];
+    doc.content = b"q /Fm0 Do Q\n".to_vec();
+    let mut b = doc.builder();
+    objects(&mut b);
+    b.build()
+}
+
+const FORM: &str = "/Type /XObject /Subtype /Form /BBox [0 0 100 100]";
+
+fn draw_recursion() -> Vec<Fixture> {
+    let form = |res: &str| format!("{FORM} {res}");
+    let type3 = "<< /Type /Font /Subtype /Type3 /FontMatrix [0.01 0 0 0.01 0 0] /FontBBox [0 0 100 100] \
+        /Encoding << /Type /Encoding /Differences [65 /a /b] >> /CharProcs << /a 12 0 R /b 13 0 R >> \
+        /FirstChar 65 /LastChar 66 /Widths [100 100] /Resources << /Font << /T3 11 0 R >> >> >>";
+    vec![
+        bad(
+            DRAW_LOOP,
+            "form-self",
+            drawing(|b| {
+                b.stream(
+                    10,
+                    &form("/Resources << /XObject << /X 10 0 R >> >>"),
+                    b"/X Do",
+                    &[],
+                );
+            }),
+            &[],
+            "Form XObject that draws itself",
+        ),
+        bad(
+            DRAW_LOOP,
+            "form-inherited",
+            drawing(|b| {
+                b.stream(10, FORM, b"/Fm0 Do", &[]);
+            }),
+            &[],
+            "Form without resources that draws itself through the page's resources",
+        ),
+        bad(
+            DRAW_LOOP,
+            "form-chain",
+            drawing(|b| {
+                b.stream(
+                    10,
+                    &form("/Resources << /XObject << /B 11 0 R >> >>"),
+                    b"q /B Do Q",
+                    &[],
+                )
+                .stream(
+                    11,
+                    &form("/Resources << /XObject << /A 10 0 R >> >>"),
+                    b"q /A Do Q",
+                    &[],
+                );
+            }),
+            &[],
+            "Two forms that draw each other",
+        ),
+        bad(
+            DRAW_LOOP,
+            "flate",
+            drawing(|b| {
+                b.stream(
+                    10,
+                    &form("/Resources << /XObject << /X 10 0 R >> >>"),
+                    b"q /X Do Q",
+                    &[Filter::Flate],
+                );
+            }),
+            &[],
+            "Self-drawing form, Flate-compressed",
+        ),
+        bad(
+            DRAW_LOOP,
+            "pattern",
+            drawing(|b| {
+                b.stream(10, &form("/Resources 14 0 R"), b"/Pattern cs /P0 scn 0 0 100 100 re f", &[])
+                    .object(14, "<< /Pattern << /P0 11 0 R >> >>")
+                    .stream(11, "/Type /Pattern /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 10 10] /XStep 10 /YStep 10 /Resources 14 0 R", b"/Pattern cs /P0 scn 0 0 10 10 re f", &[]);
+            }),
+            &[],
+            "Tiling pattern that paints with itself",
+        ),
+        bad(
+            DRAW_LOOP,
+            "soft-mask",
+            drawing(|b| {
+                b.stream(
+                    10,
+                    &form("/Group << /S /Transparency >> /Resources 14 0 R"),
+                    b"/GS0 gs 0 0 100 100 re f",
+                    &[],
+                )
+                .object(
+                    14,
+                    "<< /ExtGState << /GS0 << /SMask << /S /Luminosity /G 10 0 R >> >> >> >>",
+                );
+            }),
+            &[],
+            "Form whose soft mask is the form itself",
+        ),
+        bad(
+            DRAW_LOOP,
+            "type3-glyph",
+            drawing(|b| {
+                b.stream(
+                    10,
+                    &form("/Resources << /Font << /T3 11 0 R >> >>"),
+                    b"BT /T3 12 Tf (B) Tj ET",
+                    &[],
+                )
+                .object(11, type3)
+                .stream(12, "", b"100 0 0 0 100 100 d1 BT /T3 1 Tf (A) Tj ET", &[])
+                .stream(13, "", b"100 0 0 0 100 100 d1 0 0 100 100 re f", &[]);
+            }),
+            &[],
+            "Type 3 glyph `a` that shows itself",
+        ),
+        good(
+            DRAW_LOOP,
+            "shared-resources",
+            drawing(|b| {
+                b.stream(10, &form("/Resources 14 0 R"), b"q /Fm1 Do Q", &[])
+                    .object(14, "<< /XObject << /Fm0 10 0 R /Fm1 11 0 R >> >>")
+                    .stream(11, &form("/Resources 14 0 R"), b"0 0 10 10 re f", &[]);
+            }),
+            &[],
+            "Forms sharing a resource dictionary that lists them, without a loop",
+        ),
+        good(
+            DRAW_LOOP,
+            "nested-forms",
+            drawing(|b| {
+                b.stream(
+                    10,
+                    &form("/Resources << /XObject << /B 11 0 R >> >>"),
+                    b"/B Do /B Do",
+                    &[],
+                )
+                .stream(
+                    11,
+                    &form("/Resources << /XObject << /C 12 0 R >> >>"),
+                    b"/C Do",
+                    &[],
+                )
+                .stream(12, FORM, b"0 0 10 10 re f", &[]);
+            }),
+            &[],
+            "Forms nested three deep, one drawn twice",
+        ),
+        good(
+            DRAW_LOOP,
+            "type3-other-glyph",
+            drawing(|b| {
+                b.stream(
+                    10,
+                    &form("/Resources << /Font << /T3 11 0 R >> >>"),
+                    b"BT /T3 12 Tf (A) Tj ET",
+                    &[],
+                )
+                .object(11, type3)
+                .stream(12, "", b"100 0 0 0 100 100 d1 BT /T3 1 Tf (B) Tj ET", &[])
+                .stream(13, "", b"100 0 0 0 100 100 d1 0 0 100 100 re f", &[]);
+            }),
+            &[],
+            "Type 3 glyph built from another glyph of its font",
+        ),
+    ]
+}
+
+/// Base doc whose page draws a form shading with function stream 11
+/// (dictionary `function`), plus `more` objects.
+fn shading_with(function: &str, more: impl FnOnce(&mut PdfBuilder)) -> Vec<u8> {
+    drawing(|b| {
+        b.stream(
+            10,
+            &format!("{FORM} /Resources << /Shading << /Sh0 12 0 R >> >>"),
+            b"/Sh0 sh",
+            &[],
+        )
+        .object(
+            12,
+            "<< /ShadingType 2 /ColorSpace /DeviceRGB /Coords [0 0 100 0] /Function 11 0 R >>",
+        )
+        .stream(11, function, &[0u8; 96], &[]);
+        more(b);
+    })
+}
+
+fn shading(function: &str) -> Vec<u8> {
+    shading_with(function, |_| {})
+}
+
+fn function_size() -> Vec<Fixture> {
+    vec![
+        bad(
+            FUNCTION_SIZE,
+            "huge-table",
+            shading(
+                "/FunctionType 0 /Domain [0 1 0 1] /Range [0 1 0 1 0 1] /Size [65536 65536] /BitsPerSample 16",
+            ),
+            &[],
+            "2 inputs of 65536 samples, 3 outputs, 16 bits: 24 GiB declared",
+        ),
+        bad(
+            FUNCTION_SIZE,
+            "overflow",
+            shading(
+                "/FunctionType 0 /Domain [0 1 0 1 0 1 0 1] /Range [0 1] /Size [4294967295 4294967295 4294967295 4294967295] /BitsPerSample 32",
+            ),
+            &[],
+            "Sizes whose product overflows 64 bits",
+        ),
+        bad(
+            FUNCTION_SIZE,
+            "indirect-size",
+            shading_with(
+                "/FunctionType 0 /Domain [0 1 0 1] /Range [0 1 0 1 0 1] /Size 15 0 R /BitsPerSample 8",
+                |b| {
+                    b.object(15, "[16384 16384]");
+                },
+            ),
+            &[],
+            "`/Size` through an indirect reference",
+        ),
+        good(
+            FUNCTION_SIZE,
+            "colour-lut",
+            shading(
+                "/FunctionType 0 /Domain [0 1 0 1 0 1] /Range [0 1 0 1 0 1 0 1] /Size [33 33 33] /BitsPerSample 16",
+            ),
+            &[],
+            "33×33×33 colour lookup table, 4 outputs, 16 bits (287 KB)",
+        ),
+        good(
+            FUNCTION_SIZE,
+            "small",
+            shading(
+                "/FunctionType 0 /Domain [0 1] /Range [0 1 0 1 0 1] /Size [32] /BitsPerSample 8",
+            ),
+            &[],
+            "32 samples",
+        ),
+    ]
+}
+
 pub(super) fn all() -> Vec<Fixture> {
-    [font_malformed(), icc_malformed(), signature_modified()].concat()
+    [
+        font_malformed(),
+        icc_malformed(),
+        signature_modified(),
+        xfa_script(),
+        dangerous_uri(),
+        xml_external_reference(),
+        draw_recursion(),
+        function_size(),
+    ]
+    .concat()
 }

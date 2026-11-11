@@ -8,7 +8,7 @@ they are uploaded. It never renders or previews the file.
 - **Any frontend**: Vite, webpack, esbuild, plain HTML with `<script type="module">`, or
   straight from a CDN with no build step; any framework (React, Vue, Svelte, …) on top.
   [Every setup below](#works-with) is tested in a real browser.
-- **48 rules, fail-closed**: anything it cannot fully inspect is invalid.
+- **53 rules, fail-closed**: anything it cannot fully inspect is invalid.
 - **Fast and light**: files are read in place, never loaded whole; a 1 GB file scans in under a
   second with a few MB of engine memory ([numbers](#speed-and-memory)).
 
@@ -67,22 +67,22 @@ document, and still answers in seconds, with bounded memory, without crashing:
 
 ## What quelda checks
 
-**48 rules in 11 categories**, plus 12 engine safeguards that refuse to judge what cannot be
+**53 rules in 11 categories**, plus 12 engine safeguards that refuse to judge what cannot be
 fully inspected. Full list with explanations: [docs/rules.md](https://github.com/tranhuucanh/quelda/blob/main/docs/rules.md).
 
 | Category | Rules | Catches, for example |
 |---|---|---|
 | `filetype` | 4 | PostScript/EPS/legacy `.ai` renamed to `.pdf` (even behind a BOM or a printer header), SVG/HTML/MVG/ZIP/executables disguised as PDF, PDF + ZIP/HTML polyglots |
 | `postscript` | 3 | PostScript code inside a PDF: the `PS` operator, PostScript XObjects, non-standard Type 4 functions |
-| `active_content` | 5 | JavaScript (anywhere, any encoding), Launch actions, actions run on open or on events |
+| `active_content` | 7 | JavaScript (anywhere, any encoding, XFA form scripts), Launch actions, actions run on open or on events, links to scripts, local files or network shares |
 | `embedded` | 4 | Attached files, file attachment annotations, portfolios, Flash/3D/multimedia |
 | `external` | 7 | Links, remote documents (SMB credential leaks), form submission to a URL, network file references, images read from outside the file (external streams, OPI) |
 | `forms` | 2 | AcroForm and XFA forms |
-| `xml` | 1 | DOCTYPE/ENTITY in XMP or XFA (XXE, billion laughs), in UTF-8/16/32 |
+| `xml` | 2 | DOCTYPE/ENTITY in XMP or XFA (XXE, billion laughs), XInclude and other external references, in UTF-8/16/32 |
 | `structure` | 12 | Tampered or ambiguous structure: hidden revisions, conflicting objects, mismatched xref, page-tree loops, data after `%%EOF`, multiple headers, oversized names, content that prints but is hidden on screen, files changed after signing |
 | `encryption` | 1 | Encrypted files whose content cannot be inspected |
 | `codecs` | 6 | JBIG2 (FORCEDENTRY), JPEG 2000, Type 1 fonts, out-of-spec decoder parameters, malformed fonts and ICC colour profiles |
-| `resource` | 3 | Pixel bombs, gigantic or broken pages, page-count bombs |
+| `resource` | 5 | Pixel bombs, gigantic or broken pages, page-count bombs, drawing loops, huge colour function tables |
 
 **Tested on thousands of cases**: attack variants of every rule, clean look-alikes that must not
 trigger a rule, damaged and disguised files, and real-world PDFs. The test files are not

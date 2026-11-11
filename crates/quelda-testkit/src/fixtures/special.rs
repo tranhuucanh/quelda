@@ -875,7 +875,7 @@ fn extra_rule_variants() -> Vec<Fixture> {
             XFA,
             "xfa-script",
             acroform_doc("/XFA 20 0 R", Some(XFA_SCRIPT)),
-            &[ACROFORM],
+            &[ACROFORM, "ACTIVE.XFA_SCRIPT"],
             "XFA <script> JS",
         ),
         bad(

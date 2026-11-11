@@ -1,6 +1,6 @@
 # Rules
 
-quelda has **48 rules in 11 categories**. Each one looks for one thing that attackers use against
+quelda has **53 rules in 11 categories**. Each one looks for one thing that attackers use against
 PDF readers and server-side PDF tools (Ghostscript, ImageMagick, print RIPs, thumbnailers), or
 that makes different PDF software see different documents. On top of the rules, the engine
 refuses to judge what it cannot fully inspect (see [engine errors](policy.md#engine-errors)).
@@ -66,6 +66,8 @@ Code and actions that run in a PDF reader.
 | `ACTIVE.LAUNCH` 🔒 | Launch actions, which open or run a file or program on the reader's computer. | block | block | block |
 | `ACTIVE.OPEN_ACTION` | An action that runs automatically when the document opens. Opening at a page (a plain destination) is not reported. | block | block | warn |
 | `ACTIVE.OTHER_ACTIONS` | Other interactive actions (named, rendition, hide, layer state, sound, movie…), used to chain or hide content. | block | warn | warn |
+| `ACTIVE.XFA_SCRIPT` | Scripts (JavaScript or FormCalc) in an XFA form's XML, which Acrobat runs like document JavaScript. Empty `<script/>` elements left by form designers are not reported. | block | block | warn |
+| `ACTIVE.DANGEROUS_URI` | Links that run a script or reach the local machine or a network share: `javascript:`, `vbscript:`, `data:`, `file:`, `smb:`, `\\server\share`, Windows paths, `ms-*:` handlers (`ms-msdt:`, Follina), `search-ms:`. Can run code in web viewers or leak Windows credentials (NTLM). Ordinary links (`http`, `https`, `mailto`, `ftp`, `tel`, relative) are not reported. | block | block | warn |
 
 ## Embedded content (`embedded`)
 
@@ -108,6 +110,7 @@ XML inside the PDF (metadata, XFA forms).
 | Rule | Catches | strict | balanced | permissive |
 |---|---|---|---|---|
 | `XML.DOCTYPE` | `<!DOCTYPE` or `<!ENTITY` in embedded XML (XMP metadata, XFA), in any encoding: XML external entity (XXE) and billion-laughs attacks on the XML parsers of readers and server tools. | block | block | warn |
+| `XML.EXTERNAL_REFERENCE` | Embedded XML that makes its parser fetch something: XInclude, `<?xml-stylesheet?>`, XFA web service connections. Server-side request forgery and local file reads without a DOCTYPE. Namespace URIs are not references and are not reported. | block | block | warn |
 
 ## Structure (`structure`)
 
@@ -158,3 +161,5 @@ Files built to exhaust the memory or time of a renderer.
 | `RESOURCE.IMAGE_DIMENSIONS` | Images that declare more than `thresholds.max_image_pixels` pixels, or invalid sizes: a few bytes that make a renderer allocate gigabytes (pixel bomb). | block | block | warn |
 | `RESOURCE.PAGE_COUNT` | More than `thresholds.max_pages` pages, real or declared: exhausts thumbnailers and rasterizers. | block | block | warn |
 | `RESOURCE.PAGE_SIZE` | Pages larger than `thresholds.max_page_side_pt` on a side, or with zero/invalid size, in any of the five page boxes. | block | block | warn |
+| `RESOURCE.DRAW_RECURSION` | A form, tiling pattern, soft mask or Type 3 glyph that draws itself, directly or through others: renderers recurse until they crash or hang. Judged on what content actually draws, not on resource lists. | block | block | warn |
+| `RESOURCE.FUNCTION_SIZE` | Sampled functions (colour conversion, shadings) declaring more than 64 MiB of samples: a renderer allocating the table runs out of memory. Real colour lookup tables are a few MiB at most. | block | block | warn |

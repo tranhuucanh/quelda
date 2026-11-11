@@ -35,7 +35,7 @@ Anything you do not name keeps its preset action. So this policy:
 }
 ```
 
-means: *all 48 rules run with the `strict` actions, except that the `external` category only
+means: *all 53 rules run with the `strict` actions, except that the `external` category only
 warns, and `EXTERNAL.URI` (ordinary hyperlinks) is ignored*. It does **not** mean "run only the
 external rules". A rule set to `off` is skipped; there is no way to add rules through a policy.
 
