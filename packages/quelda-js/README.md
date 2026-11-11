@@ -18,6 +18,14 @@ they are uploaded. It never renders or previews the file.
 > ImageMagick or any other PDF processor. quelda has a server version with the same engine and
 > the same verdicts: see the [project page](https://github.com/tranhuucanh/quelda).
 
+## Documentation
+
+| Guide | Read it to |
+|---|---|
+| [**Rules**](https://github.com/tranhuucanh/quelda/blob/main/docs/rules.md) | See every rule: what it catches, and whether it blocks, warns or is off in each preset |
+| [**Policies**](https://github.com/tranhuucanh/quelda/blob/main/docs/policy.md) | Choose a preset, write your own policy, relax or tighten one rule, raise limits |
+| [**Server version**](https://github.com/tranhuucanh/quelda) | Scan the same files again on your server, with the same verdicts |
+
 ## Install
 
 ```bash
