@@ -710,3 +710,39 @@ fn slug_matches_github() {
     assert_eq!(slug(" No build step (CDN)"), "no-build-step-cdn");
     assert_eq!(slug(" README, Development"), "readme-development");
 }
+
+/// The "Modes" tables of both READMEs group the categories by their action in
+/// each preset; together they list every category once.
+#[test]
+fn readme_modes_match_the_presets() {
+    for doc in ["README.md", "packages/quelda-js/README.md"] {
+        let md = read(doc);
+        let rows: Vec<_> = table_rows(&md)
+            .into_iter()
+            .filter(|(s, _)| s == "Modes: strict, balanced, permissive")
+            .collect();
+        assert_eq!(rows.len(), 3, "{doc}");
+        let mut seen = Vec::new();
+        for (_, cells) in rows {
+            for key in cells[0].split(", ") {
+                let (key, _) = code_cell(key);
+                let cat = Category::ALL
+                    .into_iter()
+                    .find(|c| c.key() == key)
+                    .unwrap_or_else(|| panic!("{doc}: unknown category {key}"));
+                for (i, p) in Preset::ALL.into_iter().enumerate() {
+                    assert_eq!(
+                        cells[1 + i],
+                        action(presets::category_action(p, cat)),
+                        "{doc}: {key}"
+                    );
+                }
+                seen.push(key);
+            }
+        }
+        seen.sort();
+        let mut all: Vec<_> = Category::ALL.iter().map(|c| c.key().to_string()).collect();
+        all.sort();
+        assert_eq!(seen, all, "{doc}");
+    }
+}

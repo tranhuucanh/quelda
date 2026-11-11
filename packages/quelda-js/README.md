@@ -227,9 +227,27 @@ trigger a rule, damaged and disguised files, and real-world PDFs. The test files
 published, because antivirus software may flag them; if you need them, email the maintainer
 (tranhuucanh39@gmail.com).
 
-How strict it is depends on the [policy](https://github.com/tranhuucanh/quelda/blob/main/docs/policy.md): three presets (`strict`, `balanced`,
-`permissive`), then per-category and per-rule changes. A policy adjusts a preset; every rule
-always runs.
+## Modes: strict, balanced, permissive
+
+**Every rule runs in every mode.** A mode (preset) only decides what a finding does:
+**block** (the file is rejected), **warn** (reported, the file is accepted) or **off**.
+
+| Category | strict | balanced (default) | permissive |
+|---|---|---|---|
+| `filetype`, `postscript`, `encryption` | block | block | block |
+| `active_content`, `embedded`, `xml`, `resource` | block | block | warn |
+| `external`, `forms`, `structure`, `codecs` | block | warn | off |
+
+- **strict**: files from anyone go straight into Ghostscript, ImageMagick or a print RIP.
+  Rejects anything unusual, including links, forms and damaged structure.
+- **balanced**: blocks everything that can execute code, carry a payload or overload a server;
+  only warns about features common in normal documents.
+- **permissive**: files from sources you mostly trust.
+
+Locked rules (PostScript, Launch actions, files that are not PDF) block in every mode. Start
+from a mode, then change single rules: `{ "preset": "strict", "rules": { "EXTERNAL.URI": "warn" } }`.
+A few rules differ from their category; the action of every rule in every mode is in
+[rules.md](https://github.com/tranhuucanh/quelda/blob/main/docs/rules.md), and how to write a policy in [policy.md](https://github.com/tranhuucanh/quelda/blob/main/docs/policy.md).
 
 ## Speed and memory
 
@@ -341,10 +359,7 @@ await scanner.scan(file, {
 });
 ```
 
-- **`strict`**: rejects anything unusual, including links, forms and damaged structure.
-- **`balanced`** (default): blocks everything that can execute, carry a payload or exhaust a
-  server; only warns about links, forms, structure repairs and risky codecs.
-- **`permissive`**: files from sources you mostly trust; most rules only warn.
+What each preset does: [Modes](#modes-strict-balanced-permissive).
 
 Defaults are strict on purpose. If a rule blocks files your users legitimately upload, relax
 **that rule** rather than the whole category or preset. For example, `EMBED.EMBEDDED_FILE`
