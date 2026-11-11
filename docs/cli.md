@@ -18,7 +18,7 @@ processor.
 One static binary, no dependencies: **Linux x64 and arm64** (any distribution, even a `scratch`
 or distroless container) and **macOS on Apple Silicon**.
 
-### Homebrew (macOS, Linux)
+### Homebrew (macOS, Apple Silicon)
 
 ```bash
 brew install tranhuucanh/quelda/quelda
