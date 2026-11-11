@@ -5,7 +5,7 @@
 //! Two kinds, one interface: declarative rules (`rules/*.toml`, generated into
 //! [`declarative::DeclRule`]s) and code rules (one file per rule in
 //! `src/rules/<category>/`, discovered by `build.rs`, ADR #19). See
-//! `docs/ADDING_A_RULE.md`.
+//! `CONTRIBUTING.md`.
 
 #[cfg(test)]
 #[path = "../../build_support/rules_codegen.rs"]

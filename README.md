@@ -131,6 +131,8 @@ quelda identifies a file by its content, not by its extension.
 
 ## Development
 
+Want to add a rule or fix something? Read [CONTRIBUTING.md](CONTRIBUTING.md) first.
+
 ```bash
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
@@ -183,7 +185,7 @@ formula.
 | `docs/policy.md` | Policies: how they work, presets, custom policies, limits, engine errors |
 | `docs/rules.md` | Every rule: what it catches, action per preset |
 | `docs/examples/cli/` | Backend caller examples (tested) |
-| `docs/ADDING_A_RULE.md` | Checklist for adding a rule |
+| `CONTRIBUTING.md` | How to contribute, checklist for adding a rule |
 | `packaging/homebrew/` | Homebrew formula template |
 
 ## Security
