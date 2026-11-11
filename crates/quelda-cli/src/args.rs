@@ -14,6 +14,9 @@ pub enum Format {
     #[default]
     Json,
     Text,
+    /// One JSON object per file and line (several files).
+    Jsonl,
+    Csv,
 }
 
 /// Where the policy comes from (`{}` when neither is given).
@@ -32,13 +35,23 @@ pub enum Input {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Scan {
-    pub input: Input,
+    /// At least one; `Stdin` only alone.
+    pub inputs: Vec<Input>,
     pub policy: Option<PolicySource>,
     /// Overrides the policy's `preset`.
     pub preset: Option<Preset>,
     /// Sets the policy's `stop_on_first`.
     pub stop_on_first: bool,
-    pub format: Format,
+    /// `None`: `json` for one file, `jsonl` for several.
+    pub format: Option<Format>,
+    /// Folders: scan every file, not only `.pdf` and `.ai`.
+    pub all: bool,
+    /// Report absolute paths.
+    pub absolute: bool,
+    /// Add each file's SHA-256 (several files).
+    pub hash: bool,
+    /// Files scanned at once (`None`: one per CPU).
+    pub jobs: Option<usize>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -118,23 +131,38 @@ fn static_topic(t: &str) -> &'static str {
 fn parse_scan(rest: Vec<OsString>) -> Result<Command, UsageError> {
     let o = Options::parse(
         rest,
-        &["policy", "policy-json", "preset", "format"],
-        &["stop-on-first"],
+        &["policy", "policy-json", "preset", "format", "jobs"],
+        &["stop-on-first", "all", "absolute", "no-hash"],
         "scan",
     )?;
     if let Some(help) = o.help {
         return Ok(help);
     }
-    let input = match o.positionals.as_slice() {
-        [] => return Err(usage("scan: missing <file> (use `-` for stdin)")),
-        [one] if one.as_os_str() == "-" => Input::Stdin,
-        [one] => Input::Path(PathBuf::from(one)),
-        [_, extra, ..] => {
-            return Err(usage(format!(
-                "scan: unexpected argument `{}` (one file per run)",
-                lossy(extra)
-            )));
-        }
+    let inputs: Vec<Input> = o
+        .positionals
+        .iter()
+        .map(|a| {
+            if a == "-" {
+                Input::Stdin
+            } else {
+                Input::Path(PathBuf::from(a))
+            }
+        })
+        .collect();
+    if inputs.is_empty() {
+        return Err(usage("scan: missing <file> (use `-` for stdin)"));
+    }
+    if inputs.len() > 1 && inputs.contains(&Input::Stdin) {
+        return Err(usage(
+            "scan: `-` (stdin) cannot be combined with other files",
+        ));
+    }
+    let jobs = match o.value("jobs") {
+        None => None,
+        Some(v) => match v.to_str().and_then(|t| t.parse::<usize>().ok()) {
+            Some(n) if n >= 1 => Some(n),
+            _ => return Err(usage("scan: --jobs must be a whole number of at least 1")),
+        },
     };
     let policy = match (o.value("policy"), o.value("policy-json")) {
         (Some(_), Some(_)) => {
@@ -161,12 +189,25 @@ fn parse_scan(rest: Vec<OsString>) -> Result<Command, UsageError> {
             ));
         }
     };
+    let format = match o.value("format") {
+        None => None,
+        Some(_) => Some(o.format_of(&[
+            ("json", Format::Json),
+            ("jsonl", Format::Jsonl),
+            ("text", Format::Text),
+            ("csv", Format::Csv),
+        ])?),
+    };
     Ok(Command::Scan(Scan {
-        input,
+        inputs,
         policy,
         preset,
         stop_on_first: o.flags.contains(&"stop-on-first"),
-        format: o.format()?,
+        format,
+        all: o.flags.contains(&"all"),
+        absolute: o.flags.contains(&"absolute"),
+        hash: !o.flags.contains(&"no-hash"),
+        jobs,
     }))
 }
 
@@ -210,6 +251,19 @@ impl Options {
                 });
                 continue;
             }
+            // `-j N` / `-jN`: the one short option, for `--jobs`.
+            let short;
+            let text = match text.strip_prefix("-j") {
+                Some(n) if valued.contains(&"jobs") => {
+                    short = if n.is_empty() {
+                        "--jobs".to_string()
+                    } else {
+                        format!("--jobs={n}")
+                    };
+                    short.as_str()
+                }
+                _ => text,
+            };
             let Some(body) = text.strip_prefix("--") else {
                 return Err(usage(format!("{command}: unknown option `{text}`")));
             };
@@ -252,12 +306,23 @@ impl Options {
     }
 
     fn format_or(&self, default: Format) -> Result<Format, UsageError> {
-        match self.value("format").map(|v| v.to_str()) {
+        match self.value("format") {
             None => Ok(default),
-            Some(Some("json")) => Ok(Format::Json),
-            Some(Some("text")) => Ok(Format::Text),
-            Some(_) => Err(usage("--format must be json or text")),
+            Some(_) => self.format_of(&[("json", Format::Json), ("text", Format::Text)]),
         }
+    }
+
+    /// The `--format` value, one of `allowed`.
+    fn format_of(&self, allowed: &[(&str, Format)]) -> Result<Format, UsageError> {
+        let value = self.value("format").and_then(|v| v.to_str());
+        allowed
+            .iter()
+            .find(|(name, _)| Some(*name) == value)
+            .map(|(_, f)| *f)
+            .ok_or_else(|| {
+                let names: Vec<&str> = allowed.iter().map(|(n, _)| *n).collect();
+                usage(format!("--format must be {}", names.join(", ")))
+            })
     }
 
     fn no_positionals(&self, command: &str) -> Result<(), UsageError> {
@@ -300,12 +365,55 @@ mod tests {
     #[test]
     fn scan_defaults() {
         let s = scan(&["scan", "a.pdf"]);
-        assert_eq!(s.input, Input::Path("a.pdf".into()));
+        assert_eq!(s.inputs, [Input::Path("a.pdf".into())]);
         assert_eq!(s.policy, None);
         assert_eq!(s.preset, None);
         assert!(!s.stop_on_first);
-        assert_eq!(s.format, Format::Json);
-        assert_eq!(scan(&["scan", "-"]).input, Input::Stdin);
+        assert_eq!(s.format, None);
+        assert!(!s.all && !s.absolute);
+        assert!(s.hash);
+        assert_eq!(s.jobs, None);
+        assert_eq!(scan(&["scan", "-"]).inputs, [Input::Stdin]);
+    }
+
+    #[test]
+    fn scan_several_inputs_and_batch_options() {
+        let s = scan(&[
+            "scan",
+            "a",
+            "--all",
+            "dir/",
+            "--absolute",
+            "--no-hash",
+            "-j",
+            "3",
+            "b.pdf",
+        ]);
+        assert_eq!(
+            s.inputs,
+            [
+                Input::Path("a".into()),
+                Input::Path("dir/".into()),
+                Input::Path("b.pdf".into())
+            ]
+        );
+        assert!(s.all && s.absolute && !s.hash);
+        assert_eq!(s.jobs, Some(3));
+        assert_eq!(scan(&["scan", "a", "-j12"]).jobs, Some(12));
+        assert_eq!(scan(&["scan", "a", "--jobs=1"]).jobs, Some(1));
+        for (v, f) in [
+            ("json", Format::Json),
+            ("jsonl", Format::Jsonl),
+            ("text", Format::Text),
+            ("csv", Format::Csv),
+        ] {
+            assert_eq!(scan(&["scan", "a", "--format", v]).format, Some(f));
+        }
+        // `--` makes `-j` a file.
+        assert_eq!(
+            scan(&["scan", "--", "-j", "b"]).inputs,
+            [Input::Path("-j".into()), Input::Path("b".into())]
+        );
     }
 
     #[test]
@@ -319,11 +427,11 @@ mod tests {
             "--stop-on-first",
             "--preset=strict",
         ]);
-        assert_eq!(s.input, Input::Path("x.pdf".into()));
+        assert_eq!(s.inputs, [Input::Path("x.pdf".into())]);
         assert_eq!(s.policy, Some(PolicySource::File("p.json".into())));
         assert_eq!(s.preset, Some(Preset::Strict));
         assert!(s.stop_on_first);
-        assert_eq!(s.format, Format::Text);
+        assert_eq!(s.format, Some(Format::Text));
         let s = scan(&["scan", "-", "--policy-json", r#"{"preset":"strict"}"#]);
         assert_eq!(
             s.policy,
@@ -343,16 +451,25 @@ mod tests {
     #[test]
     fn double_dash_ends_options() {
         assert_eq!(
-            scan(&["scan", "--", "--policy"]).input,
-            Input::Path("--policy".into())
+            scan(&["scan", "--", "--policy"]).inputs,
+            [Input::Path("--policy".into())]
         );
-        assert_eq!(scan(&["scan", "--", "-"]).input, Input::Stdin);
+        assert_eq!(scan(&["scan", "--", "-"]).inputs, [Input::Stdin]);
     }
 
     #[test]
     fn scan_usage_errors() {
         assert!(err(&["scan"]).contains("missing <file>"));
-        assert!(err(&["scan", "a", "b"]).contains("one file per run"));
+        assert!(err(&["scan", "a", "-"]).contains("cannot be combined"));
+        assert!(err(&["scan", "-", "-"]).contains("cannot be combined"));
+        assert!(err(&["scan", "a", "--jobs", "0"]).contains("--jobs"));
+        assert!(err(&["scan", "a", "-j", "-1"]).contains("--jobs"));
+        assert!(err(&["scan", "a", "-jx"]).contains("--jobs"));
+        assert!(err(&["scan", "a", "-j"]).contains("needs a value"));
+        assert!(err(&["scan", "a", "-j", "1", "--jobs", "2"]).contains("twice"));
+        assert!(err(&["scan", "a", "--no-hash=1"]).contains("no value"));
+        assert!(err(&["rules", "--format", "jsonl"]).contains("json, text"));
+        assert!(err(&["rules", "-j1"]).contains("unknown option `-j1`"));
         assert!(err(&["scan", "a", "--policy", "p", "--policy-json", "{}"]).contains("together"));
         assert!(err(&["scan", "a", "--preset", "paranoid"]).contains("--preset"));
         assert!(err(&["scan", "a", "--preset", "Strict"]).contains("--preset"));
@@ -448,10 +565,10 @@ mod tests {
         let c = parse([OsString::from("scan"), name.clone()]);
         assert_eq!(
             c.map(|c| match c {
-                Command::Scan(s) => s.input,
-                _ => Input::Stdin,
+                Command::Scan(s) => s.inputs,
+                _ => Vec::new(),
             }),
-            Ok(Input::Path(PathBuf::from(name)))
+            Ok(vec![Input::Path(PathBuf::from(name))])
         );
     }
 }

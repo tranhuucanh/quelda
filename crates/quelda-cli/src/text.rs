@@ -3,8 +3,23 @@
 
 use serde_json::Value;
 
-fn s<'a>(v: &'a Value, key: &str) -> &'a str {
-    v.get(key).and_then(Value::as_str).unwrap_or("")
+/// A string field, made printable.
+fn s(v: &Value, key: &str) -> String {
+    printable(v.get(key).and_then(Value::as_str).unwrap_or(""))
+}
+
+/// `text` with control characters escaped (`\u{1b}`): file names and strings
+/// from inside a PDF must not drive the terminal.
+pub fn printable(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        if c.is_control() {
+            out.extend(c.escape_unicode());
+        } else {
+            out.push(c);
+        }
+    }
+    out
 }
 
 fn list<'a>(v: &'a Value, key: &str) -> &'a [Value] {
@@ -13,21 +28,28 @@ fn list<'a>(v: &'a Value, key: &str) -> &'a [Value] {
         .map_or(&[], Vec::as_slice)
 }
 
-fn plural(n: usize, one: &str, many: &str) -> String {
+pub fn plural(n: usize, one: &str, many: &str) -> String {
     format!("{n} {}", if n == 1 { one } else { many })
 }
 
 /// One line per finding / error, then a summary line.
 pub fn verdict(json: &str, input: &str) -> String {
     let Ok(v) = serde_json::from_str::<Value>(json) else {
-        return format!("ERROR  {input}\n  (unreadable verdict)\n");
+        return format!("ERROR  {}\n  (unreadable verdict)\n", printable(input));
     };
-    let mut out = format!("{}  {input}\n", s(&v, "status"));
-    for e in list(&v, "errors") {
+    let mut out = findings(&v, input);
+    out.push_str(&summary_line(&v));
+    out
+}
+
+/// The status line (`PASS    name`, statuses aligned), then one line per error and finding.
+pub fn findings(v: &Value, input: &str) -> String {
+    let mut out = format!("{:<6}  {}\n", s(v, "status"), printable(input));
+    for e in list(v, "errors") {
         out.push_str(&format!("  error  {}  {}\n", s(e, "code"), s(e, "message")));
     }
     for (label, key) in [("block", "violations"), ("warn ", "warnings")] {
-        for f in list(&v, key) {
+        for f in list(v, key) {
             let count = f.get("count").and_then(Value::as_u64).unwrap_or(0);
             out.push_str(&format!(
                 "  {label}  {}  [{}]  {}{}\n",
@@ -45,21 +67,23 @@ pub fn verdict(json: &str, input: &str) -> String {
             }
         }
     }
-    let policy = &v["policy"];
-    let preset = policy
+    out
+}
+
+fn summary_line(v: &Value) -> String {
+    let preset = v["policy"]
         .get("preset")
         .and_then(Value::as_str)
         .unwrap_or("none");
-    out.push_str(&format!(
+    format!(
         "valid: {}; {}, {}, {}; preset {preset}; {} bytes, {} ms\n",
         v.get("valid").and_then(Value::as_bool).unwrap_or(false),
-        plural(list(&v, "violations").len(), "violation", "violations"),
-        plural(list(&v, "warnings").len(), "warning", "warnings"),
-        plural(list(&v, "errors").len(), "error", "errors"),
+        plural(list(v, "violations").len(), "violation", "violations"),
+        plural(list(v, "warnings").len(), "warning", "warnings"),
+        plural(list(v, "errors").len(), "error", "errors"),
         v["stats"]["bytes"].as_u64().unwrap_or(0),
         v["stats"]["duration_ms"].as_u64().unwrap_or(0),
-    ));
-    out
+    )
 }
 
 /// `object 5 0, /OpenAction/JS` style, from whichever fields are set.
@@ -86,7 +110,7 @@ fn location(l: &Value) -> String {
     if parts.is_empty() {
         "document".to_string()
     } else {
-        parts.join(", ")
+        printable(&parts.join(", "))
     }
 }
 
@@ -140,10 +164,30 @@ mod tests {
           "stats":{"bytes":0,"objects":0,"revisions":0,"decoded_bytes":0,"duration_ms":0}}"#;
         assert_eq!(
             verdict(json, "-"),
-            "ERROR  -\n  error  POLICY.INVALID  bad\n\
+            "ERROR   -\n  error  POLICY.INVALID  bad\n\
              valid: false; 0 violations, 0 warnings, 1 error; preset none; 0 bytes, 0 ms\n"
         );
         assert!(verdict("nope", "x").starts_with("ERROR  x\n"));
+    }
+
+    #[test]
+    fn control_characters_are_escaped() {
+        assert_eq!(
+            printable("a\x1b[31mb\nc\u{7f}"),
+            "a\\u{1b}[31mb\\u{a}c\\u{7f}"
+        );
+        assert_eq!(printable("tên tệp.pdf"), "tên tệp.pdf");
+        let v: Value = serde_json::from_str(
+            r#"{"status":"REJECT","errors":[{"code":"ENGINE.READ","message":"cannot open \u001b]0;x"}],
+              "violations":[{"rule_id":"R","severity":"low","message":"m","count":1,
+                "locations":[{"detail":"\u001b[2J"}]}]}"#,
+        )
+        .unwrap();
+        let out = findings(&v, "f\x07.pdf");
+        assert!(!out.contains(['\x1b', '\x07']), "{out:?}");
+        assert!(out.starts_with("REJECT  f\\u{7}.pdf\n"), "{out}");
+        assert!(out.contains("cannot open \\u{1b}]0;x"), "{out}");
+        assert!(out.contains("at \\u{1b}[2J"), "{out}");
     }
 
     #[test]

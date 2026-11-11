@@ -6,6 +6,8 @@ JSON Schemas (draft 2020-12) for the public formats — the contract every bindi
   rule overrides, `limits`, `thresholds`, `stop_on_first`, `unsafe_allow_unlock`).
 - `verdict.schema.json` (`urn:quelda:schema:verdict:1`): the verdict output (`valid`,
   `status`, violations, warnings, errors, policy digest, stats).
+- `scan-line.schema.json` (`urn:quelda:schema:scan-line:1`): one line of the CLI output for
+  a folder or several files (`--format jsonl`): `file`, `sha256` and the `verdict`.
 - `rules.schema.json` (`urn:quelda:schema:rules:1`): the rule list (`list_rules`), one
   entry of rule metadata per rule, sorted by `id`.
 

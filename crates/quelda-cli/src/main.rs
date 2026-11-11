@@ -1,12 +1,14 @@
 //! `quelda` CLI (design §8.3): a thin wrapper around `quelda-core`.
 //!
 //! Exit codes: 0 `PASS`, 1 `REJECT`, 2 `ERROR`, 64 usage error, 74 output
-//! could not be written. Callers must treat anything but 0 as invalid.
+//! could not be written (for several files: the worst status of any file).
+//! Callers must treat anything but 0 as invalid.
 
 #![forbid(unsafe_code)]
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 mod args;
+mod batch;
 mod scan;
 mod text;
 
@@ -37,6 +39,8 @@ quelda — PDF security scanner: one PDF + policy in, verdict out
 
 Usage:
   quelda scan <file|-> [options]   Scan one file (`-`: stdin); verdict JSON on stdout
+  quelda scan <folder|file>... [options]
+                                   Scan folders (recursively) and files; one line per file
   quelda rules [--format json|text]  List every rule
   quelda version [--format json|text]
   quelda --version | --help
@@ -49,9 +53,16 @@ Run `quelda help scan` for scan options.
 
 const HELP_SCAN: &str = "\
 quelda scan <file|-> [options]
+quelda scan <folder|file>... [options]
 
 Scans one file and prints the verdict (JSON by default) on stdout.
 `-` reads the file from stdin.
+
+With a folder or several files, prints one result per file in a fixed
+order (arguments in order, folders sorted by path): JSON Lines by default,
+each line {\"file\", \"sha256\", \"verdict\"}. Folders are scanned
+recursively for .pdf and .ai files (any case); symbolic links inside
+folders are not followed. A summary goes to stderr (to stdout with text).
 
 Options:
   --preset strict|balanced|permissive
@@ -60,11 +71,21 @@ Options:
   --policy <file>        Policy JSON file (schemas/policy.schema.json).
   --policy-json <json>   Policy as a JSON string.
   --stop-on-first        Stop at the first blocking finding (faster, fewer reasons).
-  --format json|text     Output format (default: json).
+  --format json|jsonl|text|csv
+                         Output format (default: json for one file, jsonl for
+                         several; json is for one file only).
   --                     End of options (for a file name starting with `-`).
+
+Folders and several files:
+  --all                  Scan every file in folders, not only .pdf and .ai.
+  --absolute             Print absolute paths.
+  --no-hash              Do not compute each file's SHA-256 (sha256: null).
+  -j, --jobs <n>         Files scanned at once (default: one per CPU).
 
 Exit codes: 0 PASS, 1 REJECT, 2 ERROR (including an invalid or unreadable
 policy, and a file that cannot be read), 64 usage error, 74 output error.
+Several files: 0 only when every file is PASS; 2 when any file is ERROR or
+nothing was found to scan; otherwise 1.
 Always pass arguments as an array (no shell) and set a timeout.
 ";
 
@@ -115,24 +136,38 @@ fn run(
         Command::Version { format } => (version(format), EXIT_PASS),
         Command::Rules { format } => {
             let json = quelda_core::list_rules_json();
+            // The parser only gives `json` or `text` here.
             let text = match format {
-                Format::Json => json + "\n",
                 Format::Text => text::rules(&json),
+                Format::Json | Format::Jsonl | Format::Csv => json + "\n",
             };
             (text, EXIT_PASS)
         }
+        Command::Scan(s) if batch::is_batch(&s) => {
+            return match s.format {
+                Some(Format::Json) => {
+                    let _ = writeln!(
+                        err,
+                        "quelda: scan: --format json prints one verdict; use jsonl, text or csv for a folder or several files\nRun `quelda --help` for usage."
+                    );
+                    EXIT_USAGE
+                }
+                format => batch::run(&s, format.unwrap_or(Format::Jsonl), stdin, out, err),
+            };
+        }
         Command::Scan(s) => {
-            let verdict = scan::run(&s, stdin);
+            let input = s.inputs.first().cloned().unwrap_or(args::Input::Stdin);
+            let verdict = scan::run(&s, &input, stdin);
             let code = match verdict.status {
                 Status::Pass => EXIT_PASS,
                 Status::Reject => EXIT_REJECT,
                 Status::Error => EXIT_ERROR,
             };
             let json = verdict.to_json();
-            let text = match s.format {
-                Format::Json => json + "\n",
+            let text = match s.format.unwrap_or_default() {
+                Format::Json | Format::Jsonl | Format::Csv => json + "\n",
                 Format::Text => {
-                    let name = match &s.input {
+                    let name = match &input {
                         args::Input::Stdin => "-".to_string(),
                         args::Input::Path(p) => p.display().to_string(),
                     };
@@ -168,7 +203,7 @@ fn version(format: Format) -> String {
             "quelda {engine}\ncommit:  {COMMIT}\nbuilt:   {BUILD_DATE}\nrules:   {rules}\nauthors: {}\nlicense: {LICENSE}\nhome:    {HOMEPAGE}\n",
             AUTHORS.replace(':', ", ")
         ),
-        Format::Json => format!(
+        Format::Json | Format::Jsonl | Format::Csv => format!(
             "{}\n",
             serde_json::json!({
                 "version": engine,

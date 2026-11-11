@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:quelda:schema:scan-line:1",
+  "title": "quelda scan line",
+  "description": "One line of `quelda scan` output for a folder or several files (`--format jsonl`): one file and its verdict. Version 1.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["file", "sha256", "verdict"],
+  "properties": {
+    "file": {
+      "description": "The path as given on the command line, joined with the path inside the folder (absolute with --absolute); \"-\" for stdin.",
+      "type": "string"
+    },
+    "sha256": {
+      "description": "Lowercase hex SHA-256 of the file; null with --no-hash, or when the file could not be read or is larger than limits.max_file_bytes and came from a pipe.",
+      "oneOf": [
+        { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        { "type": "null" }
+      ]
+    },
+    "verdict": {
+      "$ref": "urn:quelda:schema:verdict:1"
+    }
+  }
+}
