@@ -100,26 +100,69 @@ fn changelog_has_a_section_for_this_version() {
     );
 }
 
-/// Docs link `releases/latest` instead of spelling the version, so a release
-/// never leaves them stale.
+/// Docs never spell a version (`releases/latest`, `X.Y.Z` placeholders), so a
+/// release never leaves them stale: no `N.N.N` at all, whatever the current
+/// version is. CHANGELOG.md lists versions by design.
 #[test]
-fn docs_do_not_spell_the_version() {
-    let mut docs = vec![
-        repo().join("README.md"),
-        repo().join("SECURITY.md"),
-        repo().join("packages/quelda-js/README.md"),
-    ];
+fn docs_do_not_spell_a_version() {
+    let mut docs: Vec<_> = [
+        "README.md",
+        "CONTRIBUTING.md",
+        "SECURITY.md",
+        "packages/quelda-js/README.md",
+        "schemas/README.md",
+        "fuzz/README.md",
+    ]
+    .iter()
+    .map(|p| repo().join(p))
+    .collect();
     for dir in ["docs", "packaging/homebrew"] {
         if let Ok(rd) = fs::read_dir(repo().join(dir)) {
-            docs.extend(rd.map(|e| e.unwrap().path()));
+            docs.extend(rd.map(|e| e.unwrap().path()).filter(|p| p.is_file()));
         }
     }
     for doc in docs {
-        let text = fs::read_to_string(&doc).unwrap_or_default();
-        for v in [VERSION, &format!("v{}", base(VERSION))] {
-            assert!(!text.contains(v), "{} spells version {v}", doc.display());
+        let text = fs::read_to_string(&doc).unwrap();
+        if let Some(v) = spelled_version(&text) {
+            panic!("{} spells version {v}", doc.display());
         }
     }
+}
+
+/// The first `N.N.N` (digits, dot, digits, dot, digits) in `text`.
+fn spelled_version(text: &str) -> Option<&str> {
+    let b = text.as_bytes();
+    let mut i = 0;
+    while i < b.len() {
+        if b[i].is_ascii_digit() && (i == 0 || !b[i - 1].is_ascii_digit()) {
+            let start = i;
+            let mut parts = 1;
+            while i < b.len() && (b[i].is_ascii_digit() || b[i] == b'.') {
+                if b[i] == b'.' {
+                    if !b.get(i + 1).is_some_and(u8::is_ascii_digit) {
+                        break;
+                    }
+                    parts += 1;
+                }
+                i += 1;
+            }
+            if parts >= 3 {
+                return Some(&text[start..i]);
+            }
+        }
+        i += 1;
+    }
+    None
+}
+
+#[test]
+fn spelled_version_finds_versions_only() {
+    assert_eq!(spelled_version("quelda@0.2.0/dist"), Some("0.2.0"));
+    assert_eq!(spelled_version("v10.20.3-rc.1"), Some("10.20.3"));
+    assert_eq!(
+        spelled_version("node:22-alpine, Chrome 91+, 1.5 s, X.Y.Z, 3.20."),
+        None
+    );
 }
 
 #[test]

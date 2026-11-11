@@ -571,3 +571,142 @@ fn policy_md_examples_are_valid_policies() {
     }
     assert!(n >= 6, "{n}");
 }
+
+// ---- links ----
+
+/// Markdown files people read (CHANGELOG lists versions by design).
+const LINKED_DOCS: &[&str] = &[
+    "README.md",
+    "CONTRIBUTING.md",
+    "SECURITY.md",
+    "CHANGELOG.md",
+    "docs/cli.md",
+    "docs/policy.md",
+    "docs/rules.md",
+    "packages/quelda-js/README.md",
+    "schemas/README.md",
+    "fuzz/README.md",
+];
+
+const GITHUB: &str = "https://github.com/tranhuucanh/quelda/";
+
+/// GitHub's heading anchor: lowercase, spaces → `-`, punctuation dropped.
+fn slug(heading: &str) -> String {
+    heading
+        .trim()
+        .to_lowercase()
+        .chars()
+        .filter_map(|c| match c {
+            ' ' => Some('-'),
+            c if c.is_alphanumeric() || c == '-' || c == '_' => Some(c),
+            _ => None,
+        })
+        .collect()
+}
+
+fn anchors(md: &str) -> Vec<String> {
+    let mut fenced = false;
+    md.lines()
+        .filter(|l| {
+            if l.starts_with("```") {
+                fenced = !fenced;
+            }
+            !fenced && l.starts_with('#')
+        })
+        .map(|l| slug(l.trim_start_matches('#')))
+        .collect()
+}
+
+/// `[text](target)` targets outside code (fenced blocks and `inline code`).
+fn links(md: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut fenced = false;
+    for line in md.lines() {
+        if line.starts_with("```") {
+            fenced = !fenced;
+            continue;
+        }
+        if fenced {
+            continue;
+        }
+        let mut code = false;
+        let b = line.as_bytes();
+        for i in 0..b.len() {
+            if b[i] == b'`' {
+                code = !code;
+            } else if !code && b[i] == b']' && b.get(i + 1) == Some(&b'(') {
+                if let Some(end) = line[i + 2..].find(')') {
+                    out.push(line[i + 2..i + 2 + end].to_string());
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Every link to a file of this repo (relative, or github.com/…/blob|tree/main/…)
+/// points at a file that exists, and every `#anchor` at a heading of it.
+#[test]
+fn doc_links_resolve() {
+    let mut n = 0;
+    for doc in LINKED_DOCS {
+        let dir = Path::new(doc).parent().unwrap();
+        for link in links(&read(doc)) {
+            let (path, anchor) = match link.split_once('#') {
+                Some((p, a)) => (p.to_string(), Some(a.to_string())),
+                None => (link.clone(), None),
+            };
+            let local = if let Some(rest) = path.strip_prefix(GITHUB) {
+                match rest.split_once("/main/") {
+                    Some((kind, p)) if kind == "blob" || kind == "tree" => Some(PathBuf::from(p)),
+                    _ => {
+                        assert!(
+                            rest.is_empty()
+                                || ["releases", "releases/latest", "issues"]
+                                    .contains(&rest.trim_end_matches('/')),
+                            "{doc}: unexpected GitHub link {link}"
+                        );
+                        None
+                    }
+                }
+            } else if path.starts_with("http") || path.starts_with("mailto:") {
+                None
+            } else if path.is_empty() {
+                Some(PathBuf::from(doc))
+            } else {
+                Some(dir.join(&path))
+            };
+            let Some(local) = local else { continue };
+            let file = repo().join(&local);
+            assert!(file.exists(), "{doc}: broken link {link}");
+            if let Some(a) = anchor {
+                let target = if file.is_dir() {
+                    file.join("README.md")
+                } else {
+                    file
+                };
+                let text = fs::read_to_string(&target).unwrap();
+                assert!(
+                    anchors(&text).contains(&a),
+                    "{doc}: no heading #{a} in {link}"
+                );
+            }
+            n += 1;
+        }
+    }
+    assert!(n >= 40, "{n} links checked");
+}
+
+#[test]
+fn slug_matches_github() {
+    assert_eq!(
+        slug(" Call it from your backend"),
+        "call-it-from-your-backend"
+    );
+    assert_eq!(
+        slug(" `scanner.scan(input, policy?, options?)`"),
+        "scannerscaninput-policy-options"
+    );
+    assert_eq!(slug(" No build step (CDN)"), "no-build-step-cdn");
+    assert_eq!(slug(" README, Development"), "readme-development");
+}
