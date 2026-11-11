@@ -8,7 +8,7 @@ engine share one version.
 Rule IDs never change meaning or disappear. A new rule, or a rule that starts to
 match more files, is listed under **Rules** because it can change verdicts.
 
-## [0.1.0] — unreleased
+## [0.1.0] — 2026-11-11
 
 First public release.
 

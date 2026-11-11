@@ -1,6 +1,6 @@
 {
   "name": "quelda",
-  "version": "0.1.0-rc.1",
+  "version": "0.1.0",
   "description": "PDF security scanner (WebAssembly): one PDF + policy in, verdict out",
   "license": "MIT",
   "author": "0xTh3OKrypt <tranhuucanh39@gmail.com>",
