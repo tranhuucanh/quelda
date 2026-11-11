@@ -44,6 +44,13 @@ real files we test with, no verdict changed in any preset.
 
 ### Changed
 
+- No file size limit by default: `limits.max_file_bytes` was 256 MiB and now has
+  no default, so a file of any size is scanned (files are read in place, so a
+  1 GB file takes under a second and a few MB of memory). Set
+  `limits.max_file_bytes` in the policy to bring a limit back.
+- CLI: input from stdin or a pipe is read into memory, so it stops at 4 GiB
+  (`LIMIT.FILE_BYTES`, exit 2) when the policy sets no `limits.max_file_bytes`.
+  Files given by path have no such cap.
 - CLI `--format text`: the status is padded so that file names line up
   (`PASS    a.pdf`), and control characters in file names and messages are
   escaped (`\u{1b}`) so a file cannot drive the terminal.
