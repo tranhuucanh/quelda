@@ -2,11 +2,14 @@
 // Writes the Homebrew formula for a release (ADR #34 (b)) to stdout:
 //
 //   node scripts/homebrew-formula.mjs 0.1.0 dist/SHA256SUMS > Formula/quelda.rb
+//   node scripts/homebrew-formula.mjs 0.1.0-rc.1 dist/SHA256SUMS --local /tmp/rel > test.rb
 //
 // The formula installs the prebuilt binaries from GitHub Releases (macOS
-// arm64, Linux x64/arm64). The release workflow runs this for final releases
-// only (never `-rc`), tests the formula with `brew install` / `brew test` /
-// `brew audit --strict`, then pushes it to tranhuucanh/homebrew-quelda.
+// arm64, Linux x64/arm64). Only final releases are published to
+// tranhuucanh/homebrew-quelda. `--local DIR` writes a test formula that
+// downloads from file://DIR/releases/download/v<version>/ instead (rc versions allowed): the
+// release workflow tests it with `brew install` / `brew test` /
+// `brew audit --strict` on the built archives before anything is published.
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
@@ -29,13 +32,19 @@ export function parseSums(text) {
   return sums;
 }
 
-export function formula(version, sums) {
-  if (!/^\d+\.\d+\.\d+$/.test(version)) throw new Error(`not a final release version: ${version}`);
+export const DOWNLOAD = `https://github.com/${REPO}/releases/download`;
+
+/** `local`: a directory holding `releases/download/v<version>/<asset>` (test formula, rc allowed). */
+export function formula(version, sums, { local } = {}) {
+  const re = local ? /^\d+\.\d+\.\d+(-rc\.\d+)?$/ : /^\d+\.\d+\.\d+$/;
+  if (!re.test(version)) throw new Error(`not a final release version: ${version}`);
+  // Homebrew reads the version from `…/releases/download/v<version>/…`.
+  const base = local ? `file://${local.replace(/\/+$/, '')}/releases/download` : DOWNLOAD;
   const block = (key) => {
     const asset = ASSETS[key];
     const sha = sums.get(asset);
     if (!sha) throw new Error(`SHA256SUMS has no ${asset}`);
-    return `url "https://github.com/${REPO}/releases/download/v${version}/${asset}"\n      sha256 "${sha}"`;
+    return `url "${base}/v${version}/${asset}"\n      sha256 "${sha}"`;
   };
   const tpl = readFileSync(new URL('../packaging/homebrew/quelda.rb.in', import.meta.url), 'utf8');
   return tpl
@@ -45,10 +54,12 @@ export function formula(version, sums) {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const [version, sumsPath] = process.argv.slice(2);
+  const [version, sumsPath, flag, local] = process.argv.slice(2);
   try {
-    if (!version || !sumsPath) throw new Error('usage: homebrew-formula.mjs <X.Y.Z> <SHA256SUMS>');
-    process.stdout.write(formula(version, parseSums(readFileSync(sumsPath, 'utf8'))));
+    if (!version || !sumsPath || (flag !== undefined && (flag !== '--local' || !local))) {
+      throw new Error('usage: homebrew-formula.mjs <X.Y.Z> <SHA256SUMS> [--local DIR]');
+    }
+    process.stdout.write(formula(version, parseSums(readFileSync(sumsPath, 'utf8')), { local }));
   } catch (e) {
     console.error(`homebrew-formula: ${e.message}`);
     process.exit(1);

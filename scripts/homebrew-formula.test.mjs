@@ -30,3 +30,10 @@ test('formula refuses release candidates and missing assets', () => {
   assert.throws(() => formula('1.2.3-rc.1', parseSums(sums)), /not a final release/);
   assert.throws(() => formula('1.2.3', parseSums(`${sha('a')}  ${ASSETS.macos_arm}\n`)), /SHA256SUMS has no/);
 });
+
+test('--local: a test formula downloading from file://DIR/releases/download/v<version>/, rc allowed', () => {
+  const f = formula('1.2.3-rc.4', parseSums(sums), { local: '/tmp/rel/' });
+  assert.ok(f.includes(`url "file:///tmp/rel/releases/download/v1.2.3-rc.4/${ASSETS.linux_arm}"\n      sha256 "${sha('c')}"`));
+  assert.doesNotMatch(f, /url "https:/);
+  assert.throws(() => formula('1.2', parseSums(sums), { local: '/tmp/rel' }), /not a final release/);
+});
