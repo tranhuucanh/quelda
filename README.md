@@ -1,4 +1,4 @@
-# quelda
+# quelda — PDF & Illustrator security scanner
 
 quelda checks **PDF and Adobe Illustrator (`.ai`) files** for attacks, and runs **both on the
 client and on the server**, with the same engine, the same rules and the same verdict:
@@ -21,6 +21,50 @@ compression bombs and tampered structure, and says which rule each file breaks.
 | [**Policies**](docs/policy.md) | Choose a preset, write your own policy, relax or tighten one rule, raise limits |
 | [**CLI**](docs/cli.md) | Install on a server or in Docker, options, exit codes, call it from Python, Ruby, Node.js, Go, PHP, Java |
 | [**npm package**](packages/quelda-js/README.md) | Use it in the browser: React, Vite, webpack, no bundler, CDN |
+
+## Speed and memory
+
+Scan time and peak memory of the CLI on an Apple M2 Pro, 10 cores.
+
+### One file
+
+Files over 256 MiB need `limits.max_file_bytes` raised.
+
+| File | Size | Time | Peak memory |
+|---|---:|---:|---:|
+| Real-world brochure | 54 MB | 0.02 s | 3 MB |
+| Images and text | 50 MB | 0.02 s | 3 MB |
+| Images and text | 200 MB | 0.09 s | 3 MB |
+| Images and text | 1 GB | 0.44 s | 3 MB |
+
+### A whole folder (batch mode)
+
+`quelda scan uploads/` scans every file of a folder tree in parallel, one per CPU core, and
+reports each file by its full path ([Scan a folder](docs/cli.md#scan-a-folder)):
+
+| Folder | Jobs | Time | Peak memory |
+|---|---:|---:|---:|
+| 133 real-world PDF and `.ai` files, about 800 MB | 10 (default) | 0.55 s | 343 MB |
+| 5,820 files in nested folders, 8 GB (real documents and attack test files) | 10 (default) | 6.3 s | 370 MB |
+| The same 5,820 files, one at a time | 1 | 26 s | 263 MB |
+| The same 5,820 files, `find \| xargs -P10` (one process per file) | 10 | 9.3 s | — |
+
+### Heavy files
+
+A file is heavy because of its structure, not its size: many objects, deep nesting, page
+content that must be decompressed. That is exactly what attackers build to crash or stall a
+scanner. quelda was tested on the heaviest files we could build, far beyond any real
+document, and still answers in seconds, with bounded memory, without crashing:
+
+| Heavy file | Size | Time | Peak memory |
+|---|---:|---:|---:|
+| 900,000 objects | 62 MB | 1.5 s | 443 MB |
+| 505,000 objects in 5,000 compressed object streams | 10 MB | 0.84 s | 333 MB |
+| 10,000 objects nested 120 levels deep | 18 MB | 0.55 s | 218 MB |
+| 200,000 objects full of `#xx` escapes | 33 MB | 0.44 s | 164 MB |
+| 999 incremental updates, 100,000 objects | 7 MB | 0.17 s | 57 MB |
+| 4 page streams, 480 MiB once decompressed | 53 MB | 3.0 s | 290 MB |
+| Arrays nested 100,000 levels deep (parser crash attack) | 0.2 MB | < 0.01 s | 2 MB |
 
 ## What quelda checks
 
@@ -67,31 +111,6 @@ Locked rules (PostScript, Launch actions, files that are not PDF) block in every
 from a mode, then change single rules: `{ "preset": "strict", "rules": { "EXTERNAL.URI": "warn" } }`.
 A few rules differ from their category; the action of every rule in every mode is in
 [rules.md](docs/rules.md), and how to write a policy in [policy.md](docs/policy.md).
-
-## Speed and memory
-
-Scan time and peak memory of the CLI on an Apple M2 Pro (files over 256 MiB need
-`limits.max_file_bytes` raised):
-
-| File | Size | Time | Peak memory |
-|---|---:|---:|---:|
-| Real-world brochure | 54 MB | 0.02 s | 3 MB |
-| Images only | 50 MB | 0.02 s | 3 MB |
-| Images only | 200 MB | 0.09 s | 3 MB |
-| Images only | 1 GB | 0.44 s | 3 MB |
-
-A file is heavy because of its structure, not its size: many objects, deep nesting, page
-content that must be decompressed. quelda handles files far heavier than real documents:
-
-| Heavy file | Size | Time | Peak memory |
-|---|---:|---:|---:|
-| 900,000 objects | 62 MB | 1.5 s | 443 MB |
-| 505,000 objects in 5,000 compressed object streams | 10 MB | 0.84 s | 333 MB |
-| 10,000 objects nested 120 levels deep | 18 MB | 0.55 s | 218 MB |
-| 200,000 objects full of `#xx` escapes | 33 MB | 0.44 s | 164 MB |
-| 999 incremental updates, 100,000 objects | 7 MB | 0.17 s | 57 MB |
-| 4 page streams, 480 MiB once decompressed | 53 MB | 3.0 s | 290 MB |
-| Arrays nested 100,000 levels deep (parser crash attack) | 0.2 MB | < 0.01 s | 2 MB |
 
 ## Install
 

@@ -1,4 +1,4 @@
-# quelda
+# quelda — PDF & Illustrator security scanner
 
 Checks **PDF and Adobe Illustrator (`.ai`) files** for attacks, right in the browser, before
 they are uploaded. It never renders or previews the file.
@@ -9,8 +9,8 @@ they are uploaded. It never renders or previews the file.
   straight from a CDN with no build step; any framework (React, Vue, Svelte, …) on top.
   [Every setup below](#works-with) is tested in a real browser.
 - **40 rules, fail-closed**: anything it cannot fully inspect is invalid.
-- **Fast and light**: files are read in place, never loaded whole; a 1 GB file of images scans
-  in under a second with a few MB of engine memory ([numbers](#speed-and-memory)).
+- **Fast and light**: files are read in place, never loaded whole; a 1 GB file scans in under a
+  second with a few MB of engine memory ([numbers](#speed-and-memory)).
 
 > **The browser is not a security boundary.** A check in the browser gives users instant
 > feedback and saves a pointless upload, but anyone can skip it and send a file straight to
@@ -236,6 +236,33 @@ CDN in `script-src` and `connect-src`.
 
 **Browsers:** module workers and WebAssembly SIMD: Chrome/Edge 91+, Firefox 114+, Safari 16.4+.
 
+## Speed and memory
+
+Scan time and engine memory of the WebAssembly engine on an Apple M2 Pro (Node 22, a `File`
+read in place; files over 256 MiB need `limits.max_file_bytes` raised):
+
+| File | Size | Time | Engine memory |
+|---|---:|---:|---:|
+| Real-world brochure | 54 MB | 0.06 s | 2.4 MB |
+| Images and text | 50 MB | 0.04 s | 2.4 MB |
+| Images and text | 200 MB | 0.14 s | 2.4 MB |
+| Images and text | 1 GB | 0.8 s | 2.4 MB |
+
+A file is heavy because of its structure, not its size: many objects, deep nesting, page
+content that must be decompressed. That is exactly what attackers build to crash or stall a
+scanner. quelda was tested on the heaviest files we could build, far beyond any real
+document, and still answers in seconds, with bounded memory, without crashing:
+
+| Heavy file | Size | Time | Engine memory |
+|---|---:|---:|---:|
+| 900,000 objects | 62 MB | 1.9 s | 284 MB |
+| 505,000 objects in 5,000 compressed object streams | 10 MB | 1.1 s | 246 MB |
+| 10,000 objects nested 120 levels deep | 18 MB | 0.73 s | 126 MB |
+| 200,000 objects full of `#xx` escapes | 33 MB | 0.55 s | 112 MB |
+| 999 incremental updates, 100,000 objects | 7 MB | 0.20 s | 34 MB |
+| 4 page streams, 480 MiB once decompressed | 53 MB | 3.7 s | 271 MB |
+| Arrays nested 100,000 levels deep (parser crash attack) | 0.2 MB | < 0.01 s | 1.6 MB |
+
 ## What quelda checks
 
 **40 rules in 11 categories**, plus 12 engine safeguards that refuse to judge what cannot be
@@ -281,31 +308,6 @@ Locked rules (PostScript, Launch actions, files that are not PDF) block in every
 from a mode, then change single rules: `{ "preset": "strict", "rules": { "EXTERNAL.URI": "warn" } }`.
 A few rules differ from their category; the action of every rule in every mode is in
 [rules.md](https://github.com/tranhuucanh/quelda/blob/main/docs/rules.md), and how to write a policy in [policy.md](https://github.com/tranhuucanh/quelda/blob/main/docs/policy.md).
-
-## Speed and memory
-
-Scan time and engine memory of the WebAssembly engine on an Apple M2 Pro (Node 22, a `File`
-read in place; files over 256 MiB need `limits.max_file_bytes` raised):
-
-| File | Size | Time | Engine memory |
-|---|---:|---:|---:|
-| Real-world brochure | 54 MB | 0.06 s | 2.4 MB |
-| Images only | 50 MB | 0.04 s | 2.4 MB |
-| Images only | 200 MB | 0.14 s | 2.4 MB |
-| Images only | 1 GB | 0.8 s | 2.4 MB |
-
-A file is heavy because of its structure, not its size: many objects, deep nesting, page
-content that must be decompressed. quelda handles files far heavier than real documents:
-
-| Heavy file | Size | Time | Engine memory |
-|---|---:|---:|---:|
-| 900,000 objects | 62 MB | 1.9 s | 284 MB |
-| 505,000 objects in 5,000 compressed object streams | 10 MB | 1.1 s | 246 MB |
-| 10,000 objects nested 120 levels deep | 18 MB | 0.73 s | 126 MB |
-| 200,000 objects full of `#xx` escapes | 33 MB | 0.55 s | 112 MB |
-| 999 incremental updates, 100,000 objects | 7 MB | 0.20 s | 34 MB |
-| 4 page streams, 480 MiB once decompressed | 53 MB | 3.7 s | 271 MB |
-| Arrays nested 100,000 levels deep (parser crash attack) | 0.2 MB | < 0.01 s | 1.6 MB |
 
 ## Supported files
 
