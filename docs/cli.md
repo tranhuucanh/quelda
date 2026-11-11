@@ -1,12 +1,13 @@
 # quelda CLI
 
-`quelda` scans one file and prints a verdict: valid or invalid, with the reason for each rule the
-file violates. It is a single static binary with no runtime dependencies, meant to be called by a
+`quelda` scans a file, or whole folders of them, and prints a verdict: valid or invalid, with
+the reason for each rule the file violates. It is a single static binary with no runtime dependencies, meant to be called by a
 backend written in any language before a file reaches Ghostscript, ImageMagick or any other PDF
 processor.
 
 - [Install](#install)
 - [Scan a file](#scan-a-file)
+- [Scan a folder](#scan-a-folder) (thousands of files, nested)
 - [Exit codes](#exit-codes)
 - [The verdict](#the-verdict)
 - [Policy](#policy) (details: [policy.md](policy.md), [rules.md](rules.md))
@@ -113,6 +114,104 @@ Files are identified by content, not by extension. PDF and modern Adobe Illustra
 (Illustrator 9 and later) are scanned. PostScript, EPS and legacy `.ai` files are **always
 rejected** (`FILETYPE.POSTSCRIPT_MAGIC`, a locked rule).
 
+## Scan a folder
+
+Give folders, files, or both. Folders are scanned recursively; every file gets its own result,
+with its full path:
+
+```bash
+quelda scan uploads/                           # one JSON line per file
+quelda scan uploads/ --format text             # for people: each file, then a summary by rule
+quelda scan uploads/ --format csv > report.csv # for a spreadsheet
+quelda scan uploads/ upload.pdf --preset strict
+quelda scan uploads/ | jq -r 'select(.verdict.valid | not) | .file'   # the invalid files
+```
+
+`--format text`:
+
+<!-- batch-text -->
+```text
+REJECT  uploads/2026/11/brochure.pdf
+  block  FILETYPE.NOT_PDF_HEADER  [critical]  File does not start with a PDF header
+         at file, offset 0, file starts with "%!PS-Ado"
+  block  FILETYPE.POSTSCRIPT_MAGIC  [critical]  File is PostScript/EPS, not PDF
+         at file, offset 0, PostScript magic `%!`
+  warn   STRUCT.XREF_MISMATCH  [medium]  Cross-reference data does not match the file (×2)
+PASS    uploads/2026/11/invoice.pdf
+REJECT  uploads/2026/12/form.pdf
+  block  ACTIVE.JAVASCRIPT  [high]  Document contains JavaScript
+         at object 10 0, file, offset 519
+PASS    uploads/2026/12/logo.AI
+
+4 files: 2 PASS, 2 REJECT, 0 ERROR in 0.0 s (4 jobs)
+Skipped: 1 file not .pdf or .ai (--all scans them)
+
+ACTIVE.JAVASCRIPT (block): 1 file
+  uploads/2026/12/form.pdf
+
+FILETYPE.NOT_PDF_HEADER (block): 1 file
+  uploads/2026/11/brochure.pdf
+
+FILETYPE.POSTSCRIPT_MAGIC (block): 1 file
+  uploads/2026/11/brochure.pdf
+
+STRUCT.XREF_MISMATCH (warn): 1 file
+  uploads/2026/11/brochure.pdf
+```
+
+The default output is [JSON Lines](https://jsonlines.org/): one line per file
+([`schemas/scan-line.schema.json`](../schemas/scan-line.schema.json)), with the path, the
+SHA-256 of the file and the same [verdict](#the-verdict) as a single scan:
+
+```jsonl
+{"file":"uploads/2026/12/form.pdf","sha256":"5a4d17bf…","verdict":{"valid":false,"status":"REJECT",…}}
+```
+
+`--format csv` has one row per file: `file`, `status`, `valid`, `violations` and `warnings`
+(rule IDs separated by spaces), `errors` (`CODE: message`, separated by `; `), `sha256`,
+`bytes`, `duration_ms`. A cell that starts with `=`, `+`, `-` or `@` gets a leading `'`, so
+a spreadsheet does not run a file name as a formula.
+
+What is scanned:
+
+- **Every file named on the command line**, whatever its name.
+- **Inside folders, `.pdf` and `.ai` files** (any case: `.PDF`, `.Ai`), at any depth.
+  `--all` scans every file instead (files are always identified by content, so a disguised
+  file is still caught). The summary says how many files were left out and why.
+- **Symbolic links inside folders are not followed**, nor pipes or devices (counted as
+  skipped). A link named on the command line is followed.
+- A file or folder that cannot be read gets its own `ERROR` result (`ENGINE.READ`): nothing
+  is dropped silently.
+
+The order is fixed: the arguments in order, and inside a folder the paths sorted by name, so
+two runs give the same output. Paths are printed as you typed them (`uploads/…`,
+`./uploads/…`, `/srv/uploads/…`); `--absolute` prints absolute paths.
+
+| Option | Meaning |
+|---|---|
+| `--format jsonl\|text\|csv` | Default: `jsonl`. (`json` is for one file only.) |
+| `--all` | In folders, scan every file, not only `.pdf` and `.ai`. |
+| `--absolute` | Print absolute paths. |
+| `--no-hash` | Do not compute the SHA-256 (`"sha256": null`); about 15% faster. |
+| `-j`, `--jobs <n>` | Files scanned at once. Default: one per CPU core. |
+
+`--preset`, `--policy`, `--policy-json` and `--stop-on-first` apply to every file. An invalid
+policy scans nothing (exit code `2`, message on stderr).
+
+**Exit code**: `0` only when every file is `PASS`; `2` when any file is `ERROR`, or when no
+file was found to scan; otherwise `1`. With `jsonl` and `csv` the summary line goes to
+stderr, so stdout stays machine-readable.
+
+**Speed**: files are scanned in parallel, one per CPU core. On an Apple M2 Pro (10 cores),
+5,820 files in nested folders (8 GB) take 6 s; one file at a time (`-j 1`) takes 26 s.
+**Memory**: each file being scanned needs its own memory (a few MB for most files, a few
+hundred MB for the [heaviest](../README.md#speed-and-memory)); the 5,820 files above peaked at
+370 MB. Lower `-j` to cap memory on a small server.
+
+To scan one PDF passed with a single name, nothing changes: `quelda scan upload.pdf` prints
+one verdict. To get the one-line-per-file format even for a single file (for example from a
+glob that may match one file), pass `--format jsonl`.
+
 ## Exit codes
 
 | Code | Meaning |
@@ -124,7 +223,9 @@ rejected** (`FILETYPE.POSTSCRIPT_MAGIC`, a locked rule).
 | `74` | The verdict could not be written (stdout closed). |
 
 **Treat every exit code other than `0` as invalid**, including a crash, a signal or a timeout.
-For codes 0–2 the verdict JSON is on stdout; for the others, a message is on stderr.
+For codes 0–2 the verdict JSON is on stdout; for the others, a message is on stderr. For a
+folder or several files, the code is the worst status of any file
+(see [Scan a folder](#scan-a-folder)).
 
 ## The verdict
 

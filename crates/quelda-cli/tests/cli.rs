@@ -185,7 +185,6 @@ fn usage_errors_exit_64_with_empty_stdout() {
         &[][..],
         &["nope"],
         &["scan"],
-        &["scan", pdf, pdf],
         &["scan", pdf, "--preset", "paranoid"],
         &["scan", pdf, "--format", "yaml"],
         &["scan", pdf, "--policy", "a", "--policy-json", "{}"],

@@ -9,36 +9,49 @@ use std::path::Path;
 use quelda_core::policy::PolicyError;
 use quelda_core::source::FileSource;
 use quelda_core::{Policy, ReadError, Source, Verdict};
+use sha2::{Digest, Sha256};
 
 use crate::args::{Input, PolicySource, Scan};
 
 /// Policy files are small; a larger one is a mistake (wrong path).
 pub const MAX_POLICY_BYTES: u64 = 1 << 20;
 
-/// Runs one scan.
-pub fn run(scan: &Scan, stdin: &mut dyn Read) -> Verdict {
+/// Runs one scan of `input`.
+pub fn run(scan: &Scan, input: &Input, stdin: &mut dyn Read) -> Verdict {
     let policy = policy(scan);
     // The input is read even when the policy is invalid, for `stats.bytes`
     // (and so a writer to our stdin is not cut off).
     let cap = policy.as_ref().map_or(0, |p| p.limits().max_file_bytes);
-    let input = match &scan.input {
+    let input = load(input, cap, stdin);
+    match policy {
+        Ok(p) => input.scan(&p),
+        Err(e) => quelda_core::policy_error(&e, input.len()),
+    }
+}
+
+/// Scans `input` with a policy already read, and hashes it when asked
+/// (`None`: not asked, or the bytes were not kept or could not be read).
+pub fn run_with(
+    input: &Input,
+    policy: &Policy,
+    hash: bool,
+    stdin: &mut dyn Read,
+) -> (Verdict, Option<String>) {
+    let input = load(input, policy.limits().max_file_bytes, stdin);
+    let verdict = input.scan(policy);
+    let sha256 = if hash { input.sha256() } else { None };
+    (verdict, sha256)
+}
+
+fn load(input: &Input, cap: u64, stdin: &mut dyn Read) -> Loaded {
+    match input {
         Input::Stdin => read_stream(stdin, cap, "stdin"),
         Input::Path(path) => open(path, cap),
-    };
-    let policy = match policy {
-        Ok(p) => p,
-        Err(e) => return quelda_core::policy_error(&e, input.len()),
-    };
-    match input {
-        Loaded::File(f) => quelda_core::scan_source(&f, &policy),
-        Loaded::Bytes(b) => quelda_core::scan(&b, &policy),
-        Loaded::Oversized(len) => quelda_core::scan_source(&SizeOnly(len), &policy),
-        Loaded::Failed(msg) => quelda_core::read_error(&msg, &policy),
     }
 }
 
 /// The policy with the command-line overrides applied.
-fn policy(scan: &Scan) -> Result<Policy, PolicyError> {
+pub fn policy(scan: &Scan) -> Result<Policy, PolicyError> {
     let mut policy = match &scan.policy {
         None => Policy::default(),
         Some(PolicySource::Json(json)) => Policy::from_json(json)?,
@@ -89,7 +102,40 @@ impl Loaded {
             Loaded::Failed(_) => 0,
         }
     }
+
+    fn scan(&self, policy: &Policy) -> Verdict {
+        match self {
+            Loaded::File(f) => quelda_core::scan_source(f, policy),
+            Loaded::Bytes(b) => quelda_core::scan(b, policy),
+            Loaded::Oversized(len) => quelda_core::scan_source(&SizeOnly(*len), policy),
+            Loaded::Failed(msg) => quelda_core::read_error(msg, policy),
+        }
+    }
+
+    /// Lowercase hex SHA-256 of the whole input, read through the same open
+    /// file as the scan.
+    fn sha256(&self) -> Option<String> {
+        let mut h = Sha256::new();
+        match self {
+            Loaded::Bytes(b) => h.update(b),
+            Loaded::File(f) => {
+                let mut buf = vec![0u8; HASH_CHUNK];
+                let mut offset = 0;
+                while offset < f.len() {
+                    let n = (f.len() - offset).min(HASH_CHUNK as u64) as usize;
+                    let chunk = buf.get_mut(..n)?;
+                    f.read_at(offset, chunk).ok()?;
+                    h.update(&*chunk);
+                    offset += n as u64;
+                }
+            }
+            Loaded::Oversized(_) | Loaded::Failed(_) => return None,
+        }
+        Some(h.finalize().iter().map(|b| format!("{b:02x}")).collect())
+    }
 }
+
+const HASH_CHUNK: usize = 1 << 20;
 
 fn open(path: &Path, cap: u64) -> Loaded {
     let name = path.display().to_string();
@@ -155,7 +201,6 @@ impl Source for SizeOnly {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::args::Format;
     use quelda_core::policy::Preset;
     use quelda_core::verdict::Status;
     use std::io::Cursor;
@@ -164,12 +209,21 @@ mod tests {
 
     fn scan_of(input: Input) -> Scan {
         Scan {
-            input,
+            inputs: vec![input],
             policy: None,
             preset: None,
             stop_on_first: false,
-            format: Format::Json,
+            format: None,
+            all: false,
+            absolute: false,
+            hash: true,
+            jobs: None,
         }
+    }
+
+    /// `run` on the scan's one input.
+    fn run1(scan: &Scan, stdin: &mut dyn Read) -> Verdict {
+        run(scan, &scan.inputs[0], stdin)
     }
 
     fn tmp(name: &str, bytes: &[u8]) -> std::path::PathBuf {
@@ -190,8 +244,8 @@ mod tests {
     fn stdin_file_and_lib_agree() {
         let path = tmp("minimal.pdf", MINIMAL);
         let lib = quelda_core::scan(MINIMAL, &Policy::default());
-        let from_file = run(&scan_of(Input::Path(path)), &mut Cursor::new(Vec::new()));
-        let from_stdin = run(&scan_of(Input::Stdin), &mut Cursor::new(MINIMAL.to_vec()));
+        let from_file = run1(&scan_of(Input::Path(path)), &mut Cursor::new(Vec::new()));
+        let from_stdin = run1(&scan_of(Input::Stdin), &mut Cursor::new(MINIMAL.to_vec()));
         assert_eq!(strip_time(&from_file), strip_time(&lib));
         assert_eq!(strip_time(&from_stdin), strip_time(&lib));
     }
@@ -205,7 +259,7 @@ mod tests {
         let p = policy(&s).unwrap();
         assert_eq!(p.preset, Some(Preset::Strict));
         assert_eq!(p.stop_on_first, Some(true));
-        let v = run(&s, &mut Cursor::new(MINIMAL.to_vec()));
+        let v = run1(&s, &mut Cursor::new(MINIMAL.to_vec()));
         assert_eq!(v.policy.preset, Some(Preset::Strict));
         assert!(v.policy.stop_on_first);
         // Without flags the policy is used as written.
@@ -233,7 +287,7 @@ mod tests {
             let mut s = scan_of(Input::Stdin);
             s.policy = Some(src);
             s.preset = Some(Preset::Strict); // does not rescue a bad policy
-            let v = run(&s, &mut Cursor::new(MINIMAL.to_vec()));
+            let v = run1(&s, &mut Cursor::new(MINIMAL.to_vec()));
             assert_eq!(v.status, Status::Error);
             assert_eq!(v.errors[0].code, "POLICY.INVALID");
             assert!(
@@ -256,7 +310,7 @@ mod tests {
         let missing = std::env::temp_dir().join("quelda-no-such-input.pdf");
         let dir = std::env::temp_dir();
         for path in [missing, dir] {
-            let v = run(&scan_of(Input::Path(path)), &mut Cursor::new(Vec::new()));
+            let v = run1(&scan_of(Input::Path(path)), &mut Cursor::new(Vec::new()));
             assert_eq!(v.status, Status::Error);
             assert_eq!(v.errors[0].code, "ENGINE.READ");
             assert!(v.errors[0].message.starts_with("cannot open"));
@@ -268,7 +322,7 @@ mod tests {
                 Err(std::io::Error::other("boom"))
             }
         }
-        let v = run(&scan_of(Input::Stdin), &mut Broken);
+        let v = run1(&scan_of(Input::Stdin), &mut Broken);
         assert_eq!(v.errors[0].code, "ENGINE.READ");
         assert_eq!(v.errors[0].message, "cannot read stdin: boom");
     }
@@ -280,12 +334,12 @@ mod tests {
             r#"{"limits":{"max_file_bytes":100}}"#.into(),
         ));
         let input = vec![b'x'; 200_000];
-        let v = run(&s, &mut Cursor::new(input));
+        let v = run1(&s, &mut Cursor::new(input));
         assert_eq!(v.status, Status::Error);
         assert_eq!(v.errors[0].code, "LIMIT.FILE_BYTES");
         assert_eq!(v.stats.bytes, 200_000);
         // Exactly at the limit: scanned.
-        let v = run(&s, &mut Cursor::new(vec![b'x'; 100]));
+        let v = run1(&s, &mut Cursor::new(vec![b'x'; 100]));
         assert_ne!(v.errors.first().map(|e| e.code), Some("LIMIT.FILE_BYTES"));
     }
 
@@ -310,6 +364,46 @@ mod tests {
     }
 
     #[test]
+    fn run_with_hashes_what_it_scanned() {
+        let path = tmp("hash.pdf", MINIMAL);
+        let p = Policy::default();
+        let want: String = Sha256::digest(MINIMAL)
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        let empty = &mut Cursor::new(Vec::new());
+        let (v, h) = run_with(&Input::Path(path.clone()), &p, true, empty);
+        assert_eq!(h.as_deref(), Some(want.as_str()));
+        assert_eq!(strip_time(&v), strip_time(&quelda_core::scan(MINIMAL, &p)));
+        assert_eq!(
+            run_with(&Input::Path(path.clone()), &p, false, empty).1,
+            None
+        );
+        let stdin = &mut Cursor::new(MINIMAL.to_vec());
+        assert_eq!(run_with(&Input::Stdin, &p, true, stdin).1, Some(want));
+        // Empty file: the hash of nothing.
+        let (_, h) = run_with(&Input::Path(tmp("empty.pdf", b"")), &p, true, empty);
+        assert_eq!(
+            h.as_deref(),
+            Some("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+        );
+        // Larger than one read chunk.
+        let big = vec![b'a'; HASH_CHUNK * 2 + 3];
+        let (_, h) = run_with(&Input::Path(tmp("big.bin", &big)), &p, true, empty);
+        let want: String = Sha256::digest(&big)
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        assert_eq!(h, Some(want));
+        // Unreadable or not kept: no hash.
+        let missing = std::env::temp_dir().join("quelda-no-such-hash.pdf");
+        assert_eq!(run_with(&Input::Path(missing), &p, true, empty).1, None);
+        let small = Policy::from_json(r#"{"limits":{"max_file_bytes":4}}"#).unwrap();
+        let stdin = &mut Cursor::new(MINIMAL.to_vec());
+        assert_eq!(run_with(&Input::Stdin, &small, true, stdin).1, None);
+    }
+
+    #[test]
     fn size_only_never_reads() {
         assert!(SizeOnly(5).read_at(0, &mut [0; 1]).is_err());
         assert_eq!(SizeOnly(5).len(), 5);
@@ -319,7 +413,7 @@ mod tests {
     #[test]
     fn non_regular_files_are_read_as_streams() {
         // /dev/null: a character device with no data.
-        let v = run(
+        let v = run1(
             &scan_of(Input::Path("/dev/null".into())),
             &mut Cursor::new(Vec::new()),
         );

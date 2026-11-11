@@ -117,6 +117,57 @@ fn sample_verdict_is_real_output() {
     assert_eq!(n, 1);
 }
 
+/// The `--format text` sample of a folder scan is the real output (only the
+/// time and the number of jobs differ).
+#[test]
+fn sample_folder_report_is_real_output() {
+    let md = read("docs/cli.md");
+    let shown = blocks(&md)
+        .into_iter()
+        .find(|(m, _, _)| m.as_deref() == Some("batch-text"))
+        .map(|(_, _, body)| body)
+        .unwrap();
+    let dir = std::env::temp_dir().join(format!("quelda-docs-batch-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    for (path, from) in [
+        ("uploads/2026/11/invoice.pdf", "benign/minimal.pdf"),
+        (
+            "uploads/2026/11/brochure.pdf",
+            "rules/FILETYPE.POSTSCRIPT_MAGIC/bad/ps-adobe.pdf",
+        ),
+        (
+            "uploads/2026/12/form.pdf",
+            "rules/ACTIVE.JAVASCRIPT/bad/plain.pdf",
+        ),
+        ("uploads/2026/12/logo.AI", "benign/minimal.pdf"),
+    ] {
+        let to = dir.join(path);
+        fs::create_dir_all(to.parent().unwrap()).unwrap();
+        fs::copy(fixture(from), to).unwrap();
+    }
+    fs::write(dir.join("uploads/notes.txt"), "x").unwrap();
+    let out = Command::cargo_bin("quelda")
+        .unwrap()
+        .current_dir(&dir)
+        .args(["scan", "uploads", "--format", "text"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let real = String::from_utf8(out.stdout).unwrap();
+    // `… 0 ERROR in 0.0 s (4 jobs)` → `… 0 ERROR`.
+    let timeless = |t: &str| -> String {
+        t.lines()
+            .map(|l| l.split(" ERROR in ").next().unwrap_or(l))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    assert_eq!(
+        timeless(&shown),
+        timeless(&real),
+        "docs/cli.md folder sample"
+    );
+}
+
 #[test]
 fn sample_policies_are_accepted() {
     let md = read("docs/cli.md");
@@ -206,6 +257,12 @@ fn documented_commands_run() {
     fs::create_dir_all(&dir).unwrap();
     fs::copy(fixture("benign/minimal.pdf"), dir.join("upload.pdf")).unwrap();
     fs::write(dir.join("policy.json"), r#"{"preset": "strict"}"#).unwrap();
+    // A folder for the folder examples: nested, valid files, one non-PDF.
+    for sub in ["uploads/2026/11", "uploads/2026/12"] {
+        fs::create_dir_all(dir.join(sub)).unwrap();
+        fs::copy(fixture("benign/minimal.pdf"), dir.join(sub).join("a.pdf")).unwrap();
+    }
+    fs::write(dir.join("uploads/notes.txt"), "x").unwrap();
     let mut n = 0;
     for doc in ["README.md", "docs/cli.md", "docs/policy.md"] {
         for (_, info, body) in blocks(&read(doc)) {
@@ -213,7 +270,9 @@ fn documented_commands_run() {
                 continue;
             }
             for line in body.lines().filter(|l| l.starts_with("quelda ")) {
-                let (words, stdin) = shell_words(line);
+                // The quelda part of a pipe or an output redirection.
+                let command = line.split(['|', '>']).next().unwrap_or(line);
+                let (words, stdin) = shell_words(command);
                 let mut cmd = Command::cargo_bin("quelda").unwrap();
                 cmd.current_dir(&dir).args(&words[1..]);
                 if let Some(f) = stdin {

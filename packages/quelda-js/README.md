@@ -96,6 +96,39 @@ not be fully inspected: damaged, over a limit, or the scan failed). Full format:
 
 (With a bundler, put the script in your app code. Without one, see [Works with](#works-with).)
 
+### A whole folder
+
+`webkitdirectory` lets the user pick a folder; every file inside it, at any depth, comes with
+its path in `webkitRelativePath`:
+
+```html
+<input type="file" id="folder" webkitdirectory multiple />
+<ul id="results"></ul>
+
+<script type="module">
+  import { createScanner } from 'quelda';
+
+  const scanner = await createScanner();
+
+  document.getElementById('folder').addEventListener('change', async (event) => {
+    const files = [...event.target.files]
+      .filter((f) => /\.(pdf|ai)$/i.test(f.name))
+      .sort((a, b) => a.webkitRelativePath.localeCompare(b.webkitRelativePath));
+    const list = document.getElementById('results');
+    list.replaceChildren();
+    for (const file of files) {
+      const verdict = await scanner.scan(file); // one at a time; the page stays responsive
+      const item = document.createElement('li');
+      item.textContent = `${verdict.status}  ${file.webkitRelativePath}`;
+      list.append(item);
+    }
+  });
+</script>
+```
+
+Only upload the folder if every verdict is valid. Scans run one after another in the worker
+(see [API](#scannerscaninput-policy-options)).
+
 ### React
 
 One scanner for the component's lifetime; it loads the engine once and scans files one after
