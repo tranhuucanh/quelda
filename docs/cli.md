@@ -107,8 +107,9 @@ quelda scan upload.pdf --format text           # human-readable
 | `--` | End of options, for a file name that starts with `-`. |
 
 A regular file is read on demand, so memory use does not grow with its size, and there is no
-size limit by default. stdin, pipes and devices are read whole into memory: to cap them, set
-`limits.max_file_bytes` (a larger input is then `ERROR`, `LIMIT.FILE_BYTES`, and is not kept).
+size limit by default. stdin, pipes and devices must be read into memory: they are kept up to
+`limits.max_file_bytes`, or 4 GiB when the policy sets no limit. A larger input is `ERROR`
+(`LIMIT.FILE_BYTES`) and is not kept, so an endless stream cannot use up the memory.
 
 Files are identified by content, not by extension. PDF and modern Adobe Illustrator `.ai` files
 (Illustrator 9 and later) are scanned. PostScript, EPS and legacy `.ai` files are **always
