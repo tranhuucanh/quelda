@@ -8,7 +8,7 @@ they are uploaded. It never renders or previews the file.
 - **Any frontend**: Vite, webpack, esbuild, plain HTML with `<script type="module">`, or
   straight from a CDN with no build step; any framework (React, Vue, Svelte, …) on top.
   [Every setup below](#works-with) is tested in a real browser.
-- **40 rules, fail-closed**: anything it cannot fully inspect is invalid.
+- **45 rules, fail-closed**: anything it cannot fully inspect is invalid.
 - **Fast and light**: files are read in place, never loaded whole; a 1 GB file scans in under a
   second with a few MB of engine memory ([numbers](#speed-and-memory)).
 
@@ -25,6 +25,46 @@ they are uploaded. It never renders or previews the file.
 | [**Rules**](https://github.com/tranhuucanh/quelda/blob/main/docs/rules.md) | See every rule: what it catches, and whether it blocks, warns or is off in each preset |
 | [**Policies**](https://github.com/tranhuucanh/quelda/blob/main/docs/policy.md) | Choose a preset, write your own policy, relax or tighten one rule, raise limits |
 | [**Server version**](https://github.com/tranhuucanh/quelda) | Scan the same files again on your server, with the same verdicts |
+
+## Speed and memory
+
+Scan time and engine memory of the WebAssembly engine on an Apple M2 Pro (Node 22).
+
+### One file
+
+| File | Size | Time | Engine memory |
+|---|---:|---:|---:|
+| Real-world brochure | 54 MB | 0.06 s | 2.4 MB |
+| Document with images and text | 50 MB | 0.04 s | 2.4 MB |
+| Document with images and text | 200 MB | 0.14 s | 2.4 MB |
+| Document with images and text | 1 GB | 0.8 s | 2.4 MB |
+
+### Deeply nested folders
+
+The [server version](https://github.com/tranhuucanh/quelda) scans every file in a folder tree, including deeply nested subdirectories in parallel, one per CPU core, and reports each file by its full path; in the browser, files are scanned one at a time, see
+[A whole folder](#a-whole-folder)):
+
+| Folder | Jobs | Time | Peak memory |
+|---|---:|---:|---:|
+| 133 real-world PDF and `.ai` files, about 800 MB | 10 (default) | 0.55 s | 343 MB |
+| 5,820 files in nested folders, 8 GB (real documents and attack test files) | 10 (default) | 6.3 s | 370 MB |
+
+### Heavy files
+
+A file is heavy because of its structure, not its size: many objects, deep nesting, page
+content that must be decompressed. That is exactly what attackers build to crash or stall a
+scanner. quelda was tested on the heaviest files we could build, far beyond any real
+document, and still answers in seconds, with bounded memory, without crashing:
+
+| Heavy file | Size | Time | Engine memory |
+|---|---:|---:|---:|
+| 900,000 objects | 62 MB | 1.9 s | 284 MB |
+| 505,000 objects in 5,000 compressed object streams | 10 MB | 1.1 s | 246 MB |
+| 10,000 objects nested 120 levels deep | 18 MB | 0.73 s | 126 MB |
+| 200,000 objects full of `#xx` escapes | 33 MB | 0.55 s | 112 MB |
+| 999 incremental updates, 100,000 objects | 7 MB | 0.20 s | 34 MB |
+| 4 page streams, 480 MiB once decompressed | 53 MB | 3.7 s | 271 MB |
+| Arrays nested 100,000 levels deep (parser crash attack) | 0.2 MB | < 0.01 s | 1.6 MB |
 
 ## Install
 
@@ -236,36 +276,9 @@ CDN in `script-src` and `connect-src`.
 
 **Browsers:** module workers and WebAssembly SIMD: Chrome/Edge 91+, Firefox 114+, Safari 16.4+.
 
-## Speed and memory
-
-Scan time and engine memory of the WebAssembly engine on an Apple M2 Pro (Node 22, a `File`
-read in place; files over 256 MiB need `limits.max_file_bytes` raised):
-
-| File | Size | Time | Engine memory |
-|---|---:|---:|---:|
-| Real-world brochure | 54 MB | 0.06 s | 2.4 MB |
-| Images and text | 50 MB | 0.04 s | 2.4 MB |
-| Images and text | 200 MB | 0.14 s | 2.4 MB |
-| Images and text | 1 GB | 0.8 s | 2.4 MB |
-
-A file is heavy because of its structure, not its size: many objects, deep nesting, page
-content that must be decompressed. That is exactly what attackers build to crash or stall a
-scanner. quelda was tested on the heaviest files we could build, far beyond any real
-document, and still answers in seconds, with bounded memory, without crashing:
-
-| Heavy file | Size | Time | Engine memory |
-|---|---:|---:|---:|
-| 900,000 objects | 62 MB | 1.9 s | 284 MB |
-| 505,000 objects in 5,000 compressed object streams | 10 MB | 1.1 s | 246 MB |
-| 10,000 objects nested 120 levels deep | 18 MB | 0.73 s | 126 MB |
-| 200,000 objects full of `#xx` escapes | 33 MB | 0.55 s | 112 MB |
-| 999 incremental updates, 100,000 objects | 7 MB | 0.20 s | 34 MB |
-| 4 page streams, 480 MiB once decompressed | 53 MB | 3.7 s | 271 MB |
-| Arrays nested 100,000 levels deep (parser crash attack) | 0.2 MB | < 0.01 s | 1.6 MB |
-
 ## What quelda checks
 
-**40 rules in 11 categories**, plus 12 engine safeguards that refuse to judge what cannot be
+**45 rules in 11 categories**, plus 12 engine safeguards that refuse to judge what cannot be
 fully inspected. Full list with explanations: [docs/rules.md](https://github.com/tranhuucanh/quelda/blob/main/docs/rules.md).
 
 | Category | Rules | Catches, for example |
@@ -274,12 +287,12 @@ fully inspected. Full list with explanations: [docs/rules.md](https://github.com
 | `postscript` | 3 | PostScript code inside a PDF: the `PS` operator, PostScript XObjects, non-standard Type 4 functions |
 | `active_content` | 5 | JavaScript (anywhere, any encoding), Launch actions, actions run on open or on events |
 | `embedded` | 4 | Attached files, file attachment annotations, portfolios, Flash/3D/multimedia |
-| `external` | 5 | Links, remote documents (SMB credential leaks), form submission to a URL, network file references |
+| `external` | 7 | Links, remote documents (SMB credential leaks), form submission to a URL, network file references, images read from outside the file (external streams, OPI) |
 | `forms` | 2 | AcroForm and XFA forms |
 | `xml` | 1 | DOCTYPE/ENTITY in XMP or XFA (XXE, billion laughs), in UTF-8/16/32 |
-| `structure` | 9 | Tampered or ambiguous structure: hidden revisions, conflicting objects, mismatched xref, page-tree loops, data after `%%EOF`, multiple headers |
+| `structure` | 11 | Tampered or ambiguous structure: hidden revisions, conflicting objects, mismatched xref, page-tree loops, data after `%%EOF`, multiple headers, oversized names, content that prints but is hidden on screen |
 | `encryption` | 1 | Encrypted files whose content cannot be inspected |
-| `codecs` | 3 | JBIG2 (FORCEDENTRY), JPEG 2000, Type 1 fonts |
+| `codecs` | 4 | JBIG2 (FORCEDENTRY), JPEG 2000, Type 1 fonts, out-of-spec decoder parameters |
 | `resource` | 3 | Pixel bombs, gigantic or broken pages, page-count bombs |
 
 **Tested on thousands of cases**: attack variants of every rule, clean look-alikes that must not

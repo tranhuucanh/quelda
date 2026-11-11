@@ -28,26 +28,22 @@ Scan time and peak memory of the CLI on an Apple M2 Pro, 10 cores.
 
 ### One file
 
-Files over 256 MiB need `limits.max_file_bytes` raised.
-
 | File | Size | Time | Peak memory |
 |---|---:|---:|---:|
 | Real-world brochure | 54 MB | 0.02 s | 3 MB |
-| Images and text | 50 MB | 0.02 s | 3 MB |
-| Images and text | 200 MB | 0.09 s | 3 MB |
-| Images and text | 1 GB | 0.44 s | 3 MB |
+| Document with images and text | 50 MB | 0.02 s | 3 MB |
+| Document with images and text | 200 MB | 0.09 s | 3 MB |
+| Document with images and text | 1 GB | 0.44 s | 3 MB |
 
-### A whole folder (batch mode)
+### Deeply nested folders
 
-`quelda scan uploads/` scans every file of a folder tree in parallel, one per CPU core, and
+`quelda scan uploads/` recursively scans every file in a folder tree, including deeply nested subdirectories in parallel, one per CPU core, and
 reports each file by its full path ([Scan a folder](docs/cli.md#scan-a-folder)):
 
 | Folder | Jobs | Time | Peak memory |
 |---|---:|---:|---:|
 | 133 real-world PDF and `.ai` files, about 800 MB | 10 (default) | 0.55 s | 343 MB |
 | 5,820 files in nested folders, 8 GB (real documents and attack test files) | 10 (default) | 6.3 s | 370 MB |
-| The same 5,820 files, one at a time | 1 | 26 s | 263 MB |
-| The same 5,820 files, `find \| xargs -P10` (one process per file) | 10 | 9.3 s | — |
 
 ### Heavy files
 
@@ -68,7 +64,7 @@ document, and still answers in seconds, with bounded memory, without crashing:
 
 ## What quelda checks
 
-**40 rules in 11 categories**, plus 12 engine safeguards that refuse to judge what cannot be
+**45 rules in 11 categories**, plus 12 engine safeguards that refuse to judge what cannot be
 fully inspected. Full list with explanations: [docs/rules.md](docs/rules.md).
 
 | Category | Rules | Catches, for example |
@@ -77,12 +73,12 @@ fully inspected. Full list with explanations: [docs/rules.md](docs/rules.md).
 | `postscript` | 3 | PostScript code inside a PDF: the `PS` operator, PostScript XObjects, non-standard Type 4 functions |
 | `active_content` | 5 | JavaScript (anywhere, any encoding), Launch actions, actions run on open or on events |
 | `embedded` | 4 | Attached files, file attachment annotations, portfolios, Flash/3D/multimedia |
-| `external` | 5 | Links, remote documents (SMB credential leaks), form submission to a URL, network file references |
+| `external` | 7 | Links, remote documents (SMB credential leaks), form submission to a URL, network file references, images read from outside the file (external streams, OPI) |
 | `forms` | 2 | AcroForm and XFA forms |
 | `xml` | 1 | DOCTYPE/ENTITY in XMP or XFA (XXE, billion laughs), in UTF-8/16/32 |
-| `structure` | 9 | Tampered or ambiguous structure: hidden revisions, conflicting objects, mismatched xref, page-tree loops, data after `%%EOF`, multiple headers |
+| `structure` | 11 | Tampered or ambiguous structure: hidden revisions, conflicting objects, mismatched xref, page-tree loops, data after `%%EOF`, multiple headers, oversized names, content that prints but is hidden on screen |
 | `encryption` | 1 | Encrypted files whose content cannot be inspected |
-| `codecs` | 3 | JBIG2 (FORCEDENTRY), JPEG 2000, Type 1 fonts |
+| `codecs` | 4 | JBIG2 (FORCEDENTRY), JPEG 2000, Type 1 fonts, out-of-spec decoder parameters |
 | `resource` | 3 | Pixel bombs, gigantic or broken pages, page-count bombs |
 
 **Tested on thousands of cases**: attack variants of every rule, clean look-alikes that must not
