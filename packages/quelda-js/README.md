@@ -42,7 +42,7 @@ Scan time and engine memory of the WebAssembly engine on an Apple M2 Pro (Node 2
 ### Deeply nested folders
 
 The [server version](https://github.com/tranhuucanh/quelda) scans every file in a folder tree, including deeply nested subdirectories in parallel, one per CPU core, and reports each file by its full path; in the browser, files are scanned one at a time, see
-[A whole folder](#a-whole-folder)):
+[A whole folder](#a-whole-folder):
 
 | Folder | Jobs | Time | Peak memory |
 |---|---:|---:|---:|
