@@ -571,33 +571,3 @@ fn policy_md_examples_are_valid_policies() {
     }
     assert!(n >= 6, "{n}");
 }
-
-/// The test-suite numbers the READMEs quote are the generated fixtures'.
-#[test]
-fn readme_test_counts_match_the_fixtures() {
-    let manifest: Value =
-        serde_json::from_str(&fs::read_to_string(fixture("manifest.json")).unwrap()).unwrap();
-    let files = manifest["files"].as_object().unwrap();
-    let count = |part: &str| files.keys().filter(|path| path.contains(part)).count();
-    let conformance = fs::read_dir(repo().join("tests/conformance"))
-        .unwrap()
-        .filter(|e| {
-            e.as_ref()
-                .unwrap()
-                .path()
-                .extension()
-                .is_some_and(|x| x == "json")
-        })
-        .count();
-    for doc in ["README.md", "packages/quelda-js/README.md"] {
-        let md = read(doc);
-        for quoted in [
-            format!("**{} PDF files**", files.len()),
-            format!("{} attack\nvariants", count("/bad/")),
-            format!("{} clean look-alikes", count("/good/")),
-            format!("plus {conformance}\npolicy cases"),
-        ] {
-            assert!(md.contains(&quoted), "{doc}: {quoted:?}");
-        }
-    }
-}
