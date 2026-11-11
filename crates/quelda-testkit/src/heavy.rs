@@ -84,7 +84,7 @@ pub fn catalog() -> Vec<Heavy> {
         h(
             "opaque-1g",
             Kind::Opaque { bytes: 1024 * MIB },
-            "one 1 GiB DCT image (over the default max_file_bytes)",
+            "one 1 GiB DCT image",
         ),
         h(
             "flate-pages-5000",

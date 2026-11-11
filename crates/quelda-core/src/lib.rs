@@ -399,6 +399,29 @@ mod tests {
         assert!(v.policy.digest.is_some());
     }
 
+    /// No size limit by default: an 8 GiB source is not refused up front
+    /// (it is read; this one fails on the first read).
+    #[test]
+    fn no_file_size_limit_by_default() {
+        struct Huge;
+        impl Source for Huge {
+            fn len(&self) -> u64 {
+                8 << 30
+            }
+            fn read_at(&self, _: u64, _: &mut [u8]) -> Result<(), source::ReadError> {
+                Err(source::ReadError("not stored".to_string()))
+            }
+        }
+        let v = scan_source(&Huge, &Policy::default());
+        assert_eq!(v.status, Status::Error);
+        assert_eq!(v.errors[0].code, "ENGINE.READ");
+        let v = scan_source(
+            &Huge,
+            &policy(r#"{"limits": {"max_file_bytes": 4294967296}}"#),
+        );
+        assert_eq!(v.errors[0].code, "LIMIT.FILE_BYTES");
+    }
+
     #[test]
     fn file_too_large_is_not_parsed() {
         let v = scan(MINIMAL, &policy(r#"{"limits": {"max_file_bytes": 10}}"#));

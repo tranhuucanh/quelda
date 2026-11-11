@@ -184,7 +184,7 @@ Guardrails that keep a scan's time and memory bounded. A file over a limit is `E
 
 | Limit | Default | Error |
 |---|---|---|
-| `max_file_bytes` | `268435456` (256 MiB) | `LIMIT.FILE_BYTES` |
+| `max_file_bytes` | `18446744073709551615` (no limit) | `LIMIT.FILE_BYTES` |
 | `max_objects` | `1000000` | `LIMIT.OBJECTS` |
 | `max_revisions` | `1000` | `LIMIT.REVISIONS` |
 | `max_nesting_depth` | `128` (at most 512) | `LIMIT.NESTING_DEPTH` |
@@ -223,7 +223,7 @@ An error makes the verdict `ERROR` and the file invalid, whatever the policy say
 | `ENGINE.PARSE` | Bytes the engine must parse are not valid PDF syntax. | Damaged or crafted file: reject. |
 | `ENGINE.UNDECODABLE` | A stream that must be inspected (object stream, page content, XML) uses an unknown filter or holds corrupt data. | Reject: what is hidden there cannot be checked. |
 | `ENGINE.READ` | The input could not be read (missing file, I/O error, a browser `File` that changed). | Check the path or the upload. |
-| `LIMIT.FILE_BYTES` | The file is larger than `limits.max_file_bytes`; nothing was parsed. | Raise the limit if such files are expected. |
+| `LIMIT.FILE_BYTES` | The file is larger than `limits.max_file_bytes` (no limit unless the policy sets one); nothing was parsed. | Raise the limit if such files are expected. |
 | `LIMIT.OBJECTS` | More objects than `limits.max_objects`. | Raise the limit for very large documents. |
 | `LIMIT.REVISIONS` | More revisions (incremental updates) than `limits.max_revisions`. | Usually crafted: reject. |
 | `LIMIT.NESTING_DEPTH` | Arrays/dictionaries nested deeper than `limits.max_nesting_depth`. | Usually crafted: reject. |

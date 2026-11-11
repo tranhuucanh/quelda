@@ -19,8 +19,10 @@ pub const DEFAULT_MAX_NESTING_DEPTH: u32 = 128;
 pub const DEFAULT_MAX_DECODED_BYTES_PER_STREAM: u64 = 128 << 20;
 pub const DEFAULT_MAX_DECODED_BYTES_TOTAL: u64 = 512 << 20;
 pub const DEFAULT_MAX_COMPRESSION_RATIO: u32 = 1000;
-/// Whole input; the engine holds it in memory (WASM: copied into linear memory).
-pub const DEFAULT_MAX_FILE_BYTES: u64 = 256 << 20;
+/// No limit by default: the input is read in place (a file or a browser
+/// `File`), not loaded whole, so its size does not decide memory use. Set
+/// `limits.max_file_bytes` to refuse larger files up front.
+pub const DEFAULT_MAX_FILE_BYTES: u64 = u64::MAX;
 /// Large real documents have a few hundred thousand objects.
 pub const DEFAULT_MAX_OBJECTS: u64 = 1_000_000;
 /// Signed forms reach tens of incremental updates, not thousands.
@@ -35,6 +37,7 @@ pub const RATIO_MIN_OUTPUT: u64 = 1 << 20;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Limits {
     /// Size of the input. Larger input is not parsed (`LIMIT.FILE_BYTES`).
+    /// Default: no limit.
     pub max_file_bytes: u64,
     /// Maximum number of arrays/dictionaries open at once while parsing one
     /// object. Clamped to [`HARD_MAX_NESTING_DEPTH`].
@@ -169,6 +172,11 @@ impl Budget {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn no_file_size_limit_by_default() {
+        assert_eq!(Limits::default().max_file_bytes, u64::MAX);
+    }
 
     #[test]
     fn default_thresholds() {
