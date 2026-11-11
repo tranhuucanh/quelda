@@ -1,8 +1,7 @@
 # quelda
 
-Checks **PDF files and Adobe Illustrator (`.ai`) files** for attacks, right in the browser,
-before they are uploaded. You give it a `File` and a policy; it returns a verdict: valid or
-invalid, with a reason for each rule the file breaks. It never renders or previews the file.
+Checks **PDF and Adobe Illustrator (`.ai`) files** for attacks, right in the browser, before
+they are uploaded. It never renders or previews the file.
 
 - **WebAssembly in a Web Worker**: a scan never blocks the page, and the file never leaves
   the user's machine.
@@ -215,13 +214,10 @@ fully inspected. Full list with explanations: [docs/rules.md](https://github.com
 | `codecs` | 3 | JBIG2 (FORCEDENTRY), JPEG 2000, Type 1 fonts |
 | `resource` | 3 | Pixel bombs, gigantic or broken pages, page-count bombs |
 
-**Why 40 rules but hundreds of test files?** A rule is one thing to catch ("JavaScript"), and
-there are many ways to hide each one. The test suite generates **449 PDF files**: 327 attack
-variants (each rule has several: other encodings, other locations, old revisions, object
-streams, …), 91 clean look-alikes that must *not* trigger a rule, and clean, damaged and
-disguised files. Each is checked against the exact verdict of all three presets, plus 47
-policy cases, on every build: the CLI, the WebAssembly package and the Rust library must agree
-on every one. The engine is also fuzzed and run on a corpus of real-world PDFs.
+**Tested on thousands of cases**: attack variants of every rule, clean look-alikes that must not
+trigger a rule, damaged and disguised files, and real-world PDFs. The test files are not
+published, because antivirus software may flag them; if you need them, email the maintainer
+(tranhuucanh39@gmail.com).
 
 How strict it is depends on the [policy](https://github.com/tranhuucanh/quelda/blob/main/docs/policy.md): three presets (`strict`, `balanced`,
 `permissive`), then per-category and per-rule changes. A policy adjusts a preset; every rule
@@ -242,15 +238,15 @@ read in place; files over 256 MiB need `limits.max_file_bytes` raised):
 A file is heavy because of its structure, not its size: many objects, deep nesting, page
 content that must be decompressed. quelda handles files far heavier than real documents:
 
-| Heavy file | Size | Time | Engine memory | Verdict |
-|---|---:|---:|---:|---|
-| 900,000 objects | 62 MB | 1.9 s | 284 MB | PASS |
-| 505,000 objects in 5,000 compressed object streams | 10 MB | 1.1 s | 246 MB | PASS |
-| 10,000 objects nested 120 levels deep | 18 MB | 0.73 s | 126 MB | PASS |
-| 200,000 objects full of `#xx` escapes | 33 MB | 0.55 s | 112 MB | PASS |
-| 999 incremental updates, 100,000 objects | 7 MB | 0.20 s | 34 MB | PASS |
-| 4 page streams, 480 MiB once decompressed | 53 MB | 3.7 s | 271 MB | PASS |
-| Arrays nested 100,000 levels deep (parser crash attack) | 0.2 MB | < 0.01 s | 1.6 MB | ERROR |
+| Heavy file | Size | Time | Engine memory |
+|---|---:|---:|---:|
+| 900,000 objects | 62 MB | 1.9 s | 284 MB |
+| 505,000 objects in 5,000 compressed object streams | 10 MB | 1.1 s | 246 MB |
+| 10,000 objects nested 120 levels deep | 18 MB | 0.73 s | 126 MB |
+| 200,000 objects full of `#xx` escapes | 33 MB | 0.55 s | 112 MB |
+| 999 incremental updates, 100,000 objects | 7 MB | 0.20 s | 34 MB |
+| 4 page streams, 480 MiB once decompressed | 53 MB | 3.7 s | 271 MB |
+| Arrays nested 100,000 levels deep (parser crash attack) | 0.2 MB | < 0.01 s | 1.6 MB |
 
 ## Supported files
 
