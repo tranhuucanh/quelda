@@ -64,7 +64,7 @@ document, and still answers in seconds, with bounded memory, without crashing:
 
 ## What quelda checks
 
-**45 rules in 11 categories**, plus 12 engine safeguards that refuse to judge what cannot be
+**48 rules in 11 categories**, plus 12 engine safeguards that refuse to judge what cannot be
 fully inspected. Full list with explanations: [docs/rules.md](docs/rules.md).
 
 | Category | Rules | Catches, for example |
@@ -76,9 +76,9 @@ fully inspected. Full list with explanations: [docs/rules.md](docs/rules.md).
 | `external` | 7 | Links, remote documents (SMB credential leaks), form submission to a URL, network file references, images read from outside the file (external streams, OPI) |
 | `forms` | 2 | AcroForm and XFA forms |
 | `xml` | 1 | DOCTYPE/ENTITY in XMP or XFA (XXE, billion laughs), in UTF-8/16/32 |
-| `structure` | 11 | Tampered or ambiguous structure: hidden revisions, conflicting objects, mismatched xref, page-tree loops, data after `%%EOF`, multiple headers, oversized names, content that prints but is hidden on screen |
+| `structure` | 12 | Tampered or ambiguous structure: hidden revisions, conflicting objects, mismatched xref, page-tree loops, data after `%%EOF`, multiple headers, oversized names, content that prints but is hidden on screen, files changed after signing |
 | `encryption` | 1 | Encrypted files whose content cannot be inspected |
-| `codecs` | 4 | JBIG2 (FORCEDENTRY), JPEG 2000, Type 1 fonts, out-of-spec decoder parameters |
+| `codecs` | 6 | JBIG2 (FORCEDENTRY), JPEG 2000, Type 1 fonts, out-of-spec decoder parameters, malformed fonts and ICC colour profiles |
 | `resource` | 3 | Pixel bombs, gigantic or broken pages, page-count bombs |
 
 **Tested on thousands of cases**: attack variants of every rule, clean look-alikes that must not

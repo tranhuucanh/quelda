@@ -31,7 +31,7 @@ fn registry_is_the_whole_v01_rule_set() {
     let registered: BTreeSet<&str> = list_rules().iter().map(|r| r.id).collect();
     let spec: BTreeSet<&str> = quelda_testkit::rules::RULES.iter().map(|r| r.id).collect();
     assert_eq!(registered, spec);
-    assert_eq!(registered.len(), 45);
+    assert_eq!(registered.len(), 48);
 }
 
 fn ids(v: &Value) -> Vec<String> {

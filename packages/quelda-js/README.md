@@ -8,7 +8,7 @@ they are uploaded. It never renders or previews the file.
 - **Any frontend**: Vite, webpack, esbuild, plain HTML with `<script type="module">`, or
   straight from a CDN with no build step; any framework (React, Vue, Svelte, …) on top.
   [Every setup below](#works-with) is tested in a real browser.
-- **45 rules, fail-closed**: anything it cannot fully inspect is invalid.
+- **48 rules, fail-closed**: anything it cannot fully inspect is invalid.
 - **Fast and light**: files are read in place, never loaded whole; a 1 GB file scans in under a
   second with a few MB of engine memory ([numbers](#speed-and-memory)).
 
@@ -278,7 +278,7 @@ CDN in `script-src` and `connect-src`.
 
 ## What quelda checks
 
-**45 rules in 11 categories**, plus 12 engine safeguards that refuse to judge what cannot be
+**48 rules in 11 categories**, plus 12 engine safeguards that refuse to judge what cannot be
 fully inspected. Full list with explanations: [docs/rules.md](https://github.com/tranhuucanh/quelda/blob/main/docs/rules.md).
 
 | Category | Rules | Catches, for example |
@@ -290,9 +290,9 @@ fully inspected. Full list with explanations: [docs/rules.md](https://github.com
 | `external` | 7 | Links, remote documents (SMB credential leaks), form submission to a URL, network file references, images read from outside the file (external streams, OPI) |
 | `forms` | 2 | AcroForm and XFA forms |
 | `xml` | 1 | DOCTYPE/ENTITY in XMP or XFA (XXE, billion laughs), in UTF-8/16/32 |
-| `structure` | 11 | Tampered or ambiguous structure: hidden revisions, conflicting objects, mismatched xref, page-tree loops, data after `%%EOF`, multiple headers, oversized names, content that prints but is hidden on screen |
+| `structure` | 12 | Tampered or ambiguous structure: hidden revisions, conflicting objects, mismatched xref, page-tree loops, data after `%%EOF`, multiple headers, oversized names, content that prints but is hidden on screen, files changed after signing |
 | `encryption` | 1 | Encrypted files whose content cannot be inspected |
-| `codecs` | 4 | JBIG2 (FORCEDENTRY), JPEG 2000, Type 1 fonts, out-of-spec decoder parameters |
+| `codecs` | 6 | JBIG2 (FORCEDENTRY), JPEG 2000, Type 1 fonts, out-of-spec decoder parameters, malformed fonts and ICC colour profiles |
 | `resource` | 3 | Pixel bombs, gigantic or broken pages, page-count bombs |
 
 **Tested on thousands of cases**: attack variants of every rule, clean look-alikes that must not
@@ -446,7 +446,8 @@ Prefer passing the `File` / `Blob` itself (limit: `limits.max_file_bytes`, defau
 
 - `File` / `Blob` (recommended): **never loaded whole.** The worker reads it in place with
   `FileReaderSync`: one pass in 1 MiB blocks, then only the parts the engine must parse or
-  decode (image, font and other opaque data are not read again). The engine's memory stays
+  decode (images and other opaque data are not read again; fonts and colour profiles are read
+  once more to check their structure). The engine's memory stays
   a few MiB whatever the file size, plus the data it must decompress. Your object is
   untouched; the file must not change until the scan resolves (if it does: `ENGINE.READ`).
 - `ArrayBuffer` / typed array: **copied when `scan` is called**, then copied whole into

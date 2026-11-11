@@ -78,7 +78,7 @@ fn batch_b_registered_as_designed() {
     }
     // With batch A (13 rules): the whole v0.1 rule set.
     assert_eq!(BATCH_B.len(), 26);
-    assert_eq!(registry::list().len(), 45);
+    assert_eq!(registry::list().len(), 48);
 }
 
 /// Variant names of the in-memory `bad/` fixtures of `rule`.

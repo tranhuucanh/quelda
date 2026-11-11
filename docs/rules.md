@@ -1,6 +1,6 @@
 # Rules
 
-quelda has **45 rules in 11 categories**. Each one looks for one thing that attackers use against
+quelda has **48 rules in 11 categories**. Each one looks for one thing that attackers use against
 PDF readers and server-side PDF tools (Ghostscript, ImageMagick, print RIPs, thumbnailers), or
 that makes different PDF software see different documents. On top of the rules, the engine
 refuses to judge what it cannot fully inspect (see [engine errors](policy.md#engine-errors)).
@@ -26,8 +26,9 @@ same view, so a trick that hides something from one rule hides it from none:
   normalized before any rule looks at them.
 - **Decompressed content.** Page contents, object streams and XML go through the filter chain
   (Flate, LZW, ASCII85, ASCIIHex, RunLength, predictors), with limits against compression
-  bombs. Images, fonts and attachments are not needed to judge a file and are never
-  decompressed.
+  bombs. Images and attachments are not needed to judge a file and are never decompressed.
+  Embedded fonts (TrueType, OpenType, CFF) and ICC colour profiles are decompressed only to
+  check their structure; one that does not decompress completely is not judged.
 - **Nested and indirect values.** Dictionaries inside dictionaries, values stored in other
   objects, arrays of references: a rule finds `/S /JavaScript` wherever it is.
 - **Fail-closed.** Anything the engine cannot parse, decode or read, or that exceeds a limit,
@@ -121,6 +122,7 @@ Damaged, ambiguous or unusual file structure: where different PDF readers start 
 | `STRUCT.MULTIPLE_HEADERS` | More than one `%PDF-` header: concatenated files, or a file built to look different from the front and from the back. | block | warn | off |
 | `STRUCT.NAME_TOO_LONG` | Names longer than 127 bytes (the PDF limit readers build for): long font names have overflowed buffers in renderers. Producers never write them. | block | block | block |
 | `STRUCT.PAGE_TREE_CYCLE` | Loops or repeated nodes in the page tree, which make naive readers loop forever or render a few objects as millions of pages. | block | warn | off |
+| `STRUCT.SIGNATURE_MODIFIED` | A signed file changed after signing: bytes after the signed ranges (an update saved later, which can change what is shown while the signature still verifies), signed ranges that leave out more than the signature value, or a malformed `/ByteRange`. Only the structure is checked, not the cryptography. Filling a form or adding a second signature also adds bytes, so `balanced` only warns. | block | warn | off |
 | `STRUCT.PRINT_VIEW_MISMATCH` | Content that prints but is hidden on screen (annotations flagged print-only, layers ON for print and OFF for view): what is approved on screen is not what is printed. Some real files have print-only stamps, so `balanced` only warns. | block | warn | off |
 | `STRUCT.TRAILING_DATA` | More than `thresholds.max_trailing_bytes` of data after the last `%%EOF`: how polyglots and smuggled payloads are usually built. | block | warn | off |
 | `STRUCT.TRUNCATED_STREAM` | Compressed data that stops early. Common from careless producers; quelda inspects exactly what a reader would show. | block | warn | off |
@@ -136,11 +138,13 @@ Content quelda cannot see.
 
 ## Codecs (`codecs`)
 
-Decoders with a history of exploits.
+Decoders and parsers with a history of exploits: images, fonts, colour profiles.
 
 | Rule | Catches | strict | balanced | permissive |
 |---|---|---|---|---|
 | `CODEC.DECODE_PARAMS` | Decoder parameters outside the spec (predictor, colours, bits per component, columns, rows): decoders size their buffers from them, and out-of-range values have caused overflows. Real files pass. | block | block | block |
+| `CODEC.FONT_MALFORMED` | Embedded TrueType, OpenType or CFF fonts whose tables or indexes point outside the font (a classic way to overflow font parsers in renderers and printers). Font tools never write them; a font that does not decode completely is not judged. | block | block | warn |
+| `CODEC.ICC_MALFORMED` | Embedded ICC colour profiles without the `acsp` signature, with a tag table that does not fit, or with tags past the end of the profile: colour engines read tags at the offsets the profile gives. A truncated profile (some OCR tools embed one) is not judged by its tags. | block | block | warn |
 | `CODEC.JBIG2` | Images compressed with JBIG2, whose decoders were exploited in the wild (FORCEDENTRY, CVE-2009-0658). | block | warn | off |
 | `CODEC.JPX` | Images compressed with JPEG 2000, whose decoders have a long history of memory-safety bugs. | block | warn | off |
 | `CODEC.TYPE1_FONT` | Embedded Type 1 (PostScript) font programs. Off in `balanced` because print files use them a lot. | warn | off | off |

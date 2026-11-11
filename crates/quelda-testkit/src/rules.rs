@@ -90,7 +90,7 @@ const fn custom(id: &'static str, presets: [Action; 3]) -> RuleSpec {
     }
 }
 
-/// Rule set: 40 rules in v0.1 (design §5.7, ADR #13, #26), 45 from v0.2 (ADR #40).
+/// Rule set: 40 rules in v0.1 (design §5.7, ADR #13, #26), 45 from v0.2 (ADR #40), 48 from v0.3 (ADR #42).
 pub const RULES: &[RuleSpec] = &[
     locked("FILETYPE.NOT_PDF_HEADER"),
     locked("FILETYPE.POSTSCRIPT_MAGIC"),
@@ -138,6 +138,10 @@ pub const RULES: &[RuleSpec] = &[
     custom("STRUCT.NAME_TOO_LONG", [B, B, B]),
     custom("CODEC.DECODE_PARAMS", [B, B, B]),
     r("STRUCT.PRINT_VIEW_MISMATCH"),
+    // 0.3.0
+    custom("CODEC.FONT_MALFORMED", [B, B, W]),
+    custom("CODEC.ICC_MALFORMED", [B, B, W]),
+    r("STRUCT.SIGNATURE_MODIFIED"),
 ];
 
 /// Looks up a rule by ID.
@@ -213,12 +217,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn rule_set_has_45_unique_well_formed_ids() {
-        assert_eq!(RULES.len(), 45);
+    fn rule_set_has_48_unique_well_formed_ids() {
+        assert_eq!(RULES.len(), 48);
         let mut ids: Vec<&str> = RULES.iter().map(|r| r.id).collect();
         ids.sort_unstable();
         ids.dedup();
-        assert_eq!(ids.len(), 45, "duplicate rule ID");
+        assert_eq!(ids.len(), 48, "duplicate rule ID");
         for id in ids {
             let (cat, name) = id.split_once('.').expect("CATEGORY.NAME");
             assert!(
