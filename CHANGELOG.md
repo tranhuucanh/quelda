@@ -24,7 +24,8 @@ First public release.
   1 REJECT, 2 ERROR, 64 usage error. Static binaries for Linux x64/arm64 (musl)
   and macOS arm64, Homebrew tap.
 - npm package `quelda`: WebAssembly engine in a Web Worker, TypeScript API
-  (`createScanner`, `scan`, `listRules`), for browsers and Node ≥ 20.
+  (`createScanner`, `scan`, `listRules`), for browsers; works with Vite, webpack,
+  esbuild, no bundler, import maps and CDNs.
 
 ### Rules
 
