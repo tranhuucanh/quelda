@@ -4,22 +4,12 @@
 class Quelda < Formula
   desc "PDF security scanner: one PDF and a policy in, a verdict out"
   homepage "https://github.com/tranhuucanh/quelda"
+  @MACOS_ARM@
   license "MIT"
 
-  on_macos do
-    on_arm do
-      @MACOS_ARM@
-    end
-  end
-
-  on_linux do
-    on_intel do
-      @LINUX_INTEL@
-    end
-    on_arm do
-      @LINUX_ARM@
-    end
-  end
+  # macOS (Apple Silicon) only: on Linux, install the static binary (docs/cli.md).
+  depends_on arch: :arm64
+  depends_on :macos
 
   def install
     bin.install "quelda"

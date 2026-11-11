@@ -12,7 +12,7 @@
 #   npm-test   WASM + package tests, examples in headless Chrome; packs the
 #              exact tarball that will be published
 #   brew-test  the formula, pointed at the built archives on disk, installed,
-#              tested and audited on macOS and Linux (rc too)
+#              tested and audited on macOS (rc too)
 #
 # Then one job, `publish`, in the `release` environment (required reviewer: the
 # maintainer, so it waits for approval). It checks both tokens first, then, from
@@ -187,13 +187,8 @@ jobs:
 
   brew-test:
     needs: [meta, build]
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [macos-15, ubuntu-24.04, ubuntu-24.04-arm]
-    runs-on: ${{ matrix.os }}
-    # Homebrew on Linux arm64 is not a Tier 1 platform: report, do not block.
-    continue-on-error: ${{ matrix.os == 'ubuntu-24.04-arm' }}
+    # The formula is macOS arm64 only (ADR #38).
+    runs-on: macos-15
     env:
       HOMEBREW_NO_AUTO_UPDATE: "1"
     steps:
@@ -214,15 +209,6 @@ jobs:
           cat quelda.rb
       - name: brew install / test / audit (local tap)
         run: |
-          if [ -x /home/linuxbrew/.linuxbrew/bin/brew ]; then
-            # The runner's Linuxbrew is not owned by the runner user.
-            sudo chown -R "$(id -u):$(id -g)" /home/linuxbrew/.linuxbrew
-            eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
-          fi
-          if ! command -v brew >/dev/null; then
-            NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-            eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
-          fi
           brew tap-new --no-git quelda-ci/local
           cp quelda.rb "$(brew --repository quelda-ci/local)/Formula/quelda.rb"
           brew trust quelda-ci/local 2>/dev/null || true

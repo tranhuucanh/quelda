@@ -95,7 +95,7 @@ content that must be decompressed. quelda handles files far heavier than real do
 
 ## Install
 
-**macOS or Linux, with Homebrew:**
+**macOS (Apple Silicon), with Homebrew:**
 
 ```bash
 brew install tranhuucanh/quelda/quelda
