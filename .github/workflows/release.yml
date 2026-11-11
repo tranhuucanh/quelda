@@ -308,7 +308,7 @@ jobs:
           fi
           tag=latest
           if [ "$PRERELEASE" = "true" ]; then tag=next; fi
-          npm publish "npm/quelda-$VERSION.tgz" --provenance --access public --tag "$tag"
+          npm publish "./npm/quelda-$VERSION.tgz" --provenance --access public --tag "$tag"
       - name: 3. publish the GitHub Release
         run: |
           flags=(--draft=false)
