@@ -10,9 +10,10 @@ are uploaded. It never renders or previews the file.
 | 🛡️ **Tested on real attacks** | ~32,000 real PDF files (malware, exploits, clean documents): 98.9 % of attacks rejected in strict mode, 0 clean files blocked by mistake ([results](#tested-on-real-attacks)) |
 | 🧱 **No crash on complex PDFs** | Tested on 900,000 objects, and 505,000 objects in 5,000 compressed object streams |
 | 🪶 **Fast and light** | One 1 GB PDF in 0.8 s with 2.4 MB of engine memory: files are read in place, never loaded whole ([numbers](#-speed-and-memory)) |
-| 🎚️ **3 modes, any rule on/off** | `strict` · `balanced` · `permissive`, then `{ rules: { 'EXTERNAL.URI': 'off' } }` ([modes](#-modes-strict-balanced-permissive)) |
+| 📦 **Self-contained** | No external tools, services or network calls: the engine ships inside the package, with no dependencies |
+| 🔎 **Clear reasons** | Every rejected file says which rule it broke, where in the file, and why |
+| 🎚️ **Easy to tune** | Pick the mode that fits you (`strict` · `balanced` · `permissive`), then switch any single rule on or off: `{ rules: { 'EXTERNAL.URI': 'off' } }` ([modes](#-modes-strict-balanced-permissive)) |
 | 🧩 **Any frontend** | Vite, webpack, esbuild, plain HTML, CDN; React, Vue, Svelte… ([tested in a real browser](#-works-with)) |
-| 🔒 **56 rules, fail-closed** | Anything it cannot fully inspect is invalid |
 
 > **The browser is not a security boundary.** A check in the browser gives users instant
 > feedback and saves a pointless upload, but anyone can skip it and send a file straight to

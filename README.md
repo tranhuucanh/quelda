@@ -1,7 +1,7 @@
 # quelda — PDF & Illustrator security scanner
 
-quelda scans **PDF and Illustrator (`.ai`) files** for malicious content, with **one rule set
-for the browser and the server**:
+quelda scans **PDF and Illustrator (`.ai`) files** for malicious content, with **the same rules
+and the same verdicts in the browser and on your server**.
 
 | Why quelda | |
 |---|---|
@@ -10,7 +10,9 @@ for the browser and the server**:
 | 🛡️ **Tested on real attacks** | ~32,000 real PDF files (malware, exploits, clean documents): 98.9 % of attacks rejected in strict mode, 0 clean files blocked by mistake ([results](#tested-on-real-attacks)) |
 | 🧱 **No crash on complex PDFs** | Tested on 900,000 objects, and 505,000 objects in 5,000 compressed object streams |
 | 🪶 **Fast and light** | One 1 GB PDF in 0.44 s with 3 MB of memory; a folder of 5,820 files (8 GB) in 6.3 s ([numbers](#-speed-and-memory)) |
-| 🎚️ **3 modes, any rule on/off** | `strict` · `balanced` · `permissive`, then `--rule EXTERNAL.URI=off` ([modes](#-modes-strict-balanced-permissive)) |
+| 📦 **Self-contained** | No external tools, services or network calls: one static binary on the server, one npm package in the browser |
+| 🔎 **Clear reasons** | Every rejected file says which rule it broke, where in the file, and why |
+| 🎚️ **Easy to tune** | Pick the mode that fits you (`strict` · `balanced` · `permissive`), then switch any single rule on or off: `--rule EXTERNAL.URI=off` ([modes](#-modes-strict-balanced-permissive)) |
 
 | | Client (browser) | Server (backend) |
 |---|---|---|
