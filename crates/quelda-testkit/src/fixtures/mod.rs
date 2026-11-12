@@ -13,6 +13,7 @@ mod dict_cases;
 mod filetype;
 mod malformed;
 mod rules_03;
+mod rules_04;
 mod special;
 
 use crate::builder::PdfBuilder;
@@ -278,6 +279,7 @@ pub fn all() -> Vec<Fixture> {
     out.extend(adr26::all());
     out.extend(batch_c::all());
     out.extend(rules_03::all());
+    out.extend(rules_04::all());
     out
 }
 

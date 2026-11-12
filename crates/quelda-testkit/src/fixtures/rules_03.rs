@@ -8,6 +8,7 @@ use crate::filters::Filter;
 
 const FONT: &str = "CODEC.FONT_MALFORMED";
 const ICC: &str = "CODEC.ICC_MALFORMED";
+const ICC_UNREC: &str = "CODEC.ICC_UNRECOGNIZED";
 const SIG: &str = "STRUCT.SIGNATURE_MODIFIED";
 const INCR: &str = "STRUCT.INCREMENTAL_UPDATE";
 const TYPE1: &str = "CODEC.TYPE1_FONT";
@@ -312,16 +313,85 @@ fn icc(profile: &[u8]) -> Vec<u8> {
     icc_builder(COLOR_SPACE, profile, &[]).build()
 }
 
+fn icc_unrecognized() -> Vec<Fixture> {
+    let unsigned = profile_with(36, b"xxxx");
+    vec![
+        bad(
+            ICC_UNREC,
+            "plain",
+            icc(&unsigned),
+            &[],
+            "Profile data without the `acsp` signature",
+        ),
+        bad(
+            ICC_UNREC,
+            "byte-swapped",
+            icc(&profile_with(36, b"caps")),
+            &[],
+            "Byte-swapped signature (`caps`), as some real producers write",
+        ),
+        bad(
+            ICC_UNREC,
+            "flate",
+            icc_builder(COLOR_SPACE, &unsigned, &[Filter::Flate]).build(),
+            &[],
+            "Flate-compressed",
+        ),
+        bad(
+            ICC_UNREC,
+            "output-intent",
+            icc_builder(
+                "<< /Type /OutputIntent /S /GTS_PDFA1 /DestOutputProfile 12 0 R >>",
+                &unsigned,
+                &[],
+            )
+            .build(),
+            &[],
+            "Output intent profile",
+        ),
+        good(ICC_UNREC, "valid", icc(&profile()), &[], "Valid profile"),
+        good(
+            ICC_UNREC,
+            "short",
+            icc(&profile()[..100]),
+            &[ICC],
+            "Too short to hold a signature: CODEC.ICC_MALFORMED's",
+        ),
+        good(
+            ICC_UNREC,
+            "unreferenced-stream",
+            {
+                let mut b = Doc::new().builder();
+                b.stream(12, "/N 1", &unsigned, &[]);
+                b.build()
+            },
+            &[],
+            "Unsigned bytes in a stream nothing names as a profile",
+        ),
+    ]
+}
+
 fn icc_malformed() -> Vec<Fixture> {
     let short = &profile()[..100];
     vec![
         bad(ICC, "short", icc(short), &[], "Profile of 100 bytes: shorter than its header"),
-        bad(
+        good(
             ICC,
-            "no-acsp",
+            "no-signature",
             icc(&profile_with(36, b"xxxx")),
-            &[],
-            "Profile without the `acsp` signature",
+            &[ICC_UNREC],
+            "No `acsp` signature: not a profile, CODEC.ICC_UNRECOGNIZED's",
+        ),
+        good(
+            ICC,
+            "no-signature-bad-tag-table",
+            {
+                let mut p = profile_with(36, b"caps");
+                p[128..132].copy_from_slice(&u32::MAX.to_be_bytes());
+                icc(&p)
+            },
+            &[ICC_UNREC],
+            "No signature and a nonsense tag count: data that is not a profile has no tags to judge",
         ),
         bad(
             ICC,
@@ -1639,6 +1709,7 @@ pub(super) fn all() -> Vec<Fixture> {
     [
         font_malformed(),
         icc_malformed(),
+        icc_unrecognized(),
         signature_modified(),
         xfa_script(),
         dangerous_uri(),

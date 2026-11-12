@@ -1,6 +1,7 @@
 //! `CODEC.ICC_MALFORMED`: an embedded ICC colour profile whose structure no
-//! colour tool writes: no `acsp` signature, a tag table that does not fit,
-//! or tags that point outside the profile. Colour engines (Little CMS in
+//! colour tool writes: a tag table that does not fit, or tags that point
+//! outside the profile. Data without the `acsp` signature is not a profile
+//! at all and is `CODEC.ICC_UNRECOGNIZED`'s (real files have such streams). Colour engines (Little CMS in
 //! Ghostscript and pdf tools, vendor engines in printers) trust these
 //! offsets.
 //!
@@ -29,7 +30,7 @@ static META: RuleMeta = RuleMeta {
     message: "Embedded ICC colour profile is malformed",
     description: "An ICC profile (a stream of an /ICCBased colour space or an output \
         intent's /DestOutputProfile) whose structure is impossible (ICC.1:2010 §7): \
-        shorter than its header, without the 'acsp' signature, with a tag table that does \
+        shorter than its header, or carrying the 'acsp' signature with a tag table that does \
         not fit in the profile or has more than 1024 tags, or with a tag that ends past \
         both the profile's data and the size its header declares (a truncated profile, as \
         some OCR tools embed, is not judged by its tags). Colour engines in renderers and printers read tags at the offsets \
@@ -48,14 +49,20 @@ fn u32_at(d: &[u8], at: usize) -> Option<u32> {
     Some(u32::from_be_bytes([b[0], b[1], b[2], b[3]]))
 }
 
+/// Data long enough for an ICC header but without the `acsp` signature:
+/// not a profile (`CODEC.ICC_UNRECOGNIZED`), so its "tags" are not judged.
+pub(crate) fn lacks_signature(d: &[u8]) -> bool {
+    d.len() >= HEADER && d.get(36..40) != Some(b"acsp")
+}
+
 /// An ICC profile: `Err` says what is malformed.
 fn check(d: &[u8]) -> Result<(), String> {
     let len = d.len() as u64;
     if d.len() < HEADER {
         return Err(format!("{len} bytes, shorter than an ICC header"));
     }
-    if d.get(36..40) != Some(b"acsp") {
-        return Err("no 'acsp' signature".to_string());
+    if lacks_signature(d) {
+        return Ok(());
     }
     let declared = u64::from(u32_at(d, 0).unwrap_or(0));
     let count = u32_at(d, 128).unwrap_or(0);
@@ -92,7 +99,7 @@ fn streams(doc: &Document, r: ObjRef, out: &mut BTreeSet<usize>) {
 /// ICC profile streams: `[/ICCBased s]` arrays and `/DestOutputProfile`
 /// values anywhere in any object. Iterative: nesting is bounded by the
 /// parser, not the stack.
-fn profiles(ctx: &Ctx) -> BTreeSet<usize> {
+pub(crate) fn profiles(ctx: &Ctx) -> BTreeSet<usize> {
     let doc = ctx.document();
     let mut out = BTreeSet::new();
     for entry in ctx.objects() {
@@ -176,7 +183,11 @@ pub(crate) mod tests {
             d[at..at + v.len()].copy_from_slice(v);
             d
         };
-        assert_eq!(err(&with(36, b"xxxx")), "no 'acsp' signature");
+        // No signature: not a profile, left to CODEC.ICC_UNRECOGNIZED.
+        assert_eq!(check(&with(36, b"xxxx")), Ok(()));
+        assert!(lacks_signature(&with(36, b"xxxx")));
+        assert!(!lacks_signature(&profile()));
+        assert!(!lacks_signature(&profile()[..100]));
         assert_eq!(
             err(&with(128, &9u32.to_be_bytes())),
             "tag table of 9 tags ends at 240, past the profile (156 bytes)"

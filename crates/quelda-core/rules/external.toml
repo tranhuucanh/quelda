@@ -17,19 +17,19 @@ match = { dict = { key = "S", name = "URI" } }
 id = "EXTERNAL.REMOTE_GOTO"
 category = "external"
 severity = "medium"
-default_action = "warn"
+default_action = "block"
 locked = false
 stage = "stable"
 since = "0.1.0"
 message = "Document jumps to another (remote or embedded) document"
-description = "A remote or embedded go-to action (/S /GoToR or /S /GoToE, ISO 32000-2 §12.6.4.3, §12.6.4.4): opens another file, possibly over the network (UNC/SMB paths leak credentials), or an attachment."
-match = { dict = { key = "S", name_in = ["GoToR", "GoToE"] } }
+description = "A remote or embedded go-to action (/S /GoToR or /S /GoToE, ISO 32000-2 §12.6.4.3, §12.6.4.4): opens another file, possibly over the network (UNC/SMB paths leak credentials), or an attachment. Also a thread action that names a file (/S /Thread with /F, §12.6.4.7): it opens that file the same way."
+match = { dict = { any = [ { key = "S", name_in = ["GoToR", "GoToE"] }, { all = [ { key = "S", name = "Thread" }, { key = "F" } ] } ] } }
 
 [[rule]]
 id = "EXTERNAL.SUBMIT_FORM"
 category = "external"
 severity = "medium"
-default_action = "warn"
+default_action = "block"
 locked = false
 stage = "stable"
 since = "0.1.0"
@@ -41,7 +41,7 @@ match = { dict = { key = "S", name = "SubmitForm" } }
 id = "EXTERNAL.IMPORT_DATA"
 category = "external"
 severity = "medium"
-default_action = "warn"
+default_action = "block"
 locked = false
 stage = "stable"
 since = "0.1.0"
@@ -53,7 +53,7 @@ match = { dict = { key = "S", name = "ImportData" } }
 id = "EXTERNAL.URL_FILESPEC"
 category = "external"
 severity = "medium"
-default_action = "warn"
+default_action = "block"
 locked = false
 stage = "stable"
 since = "0.1.0"

@@ -10,7 +10,7 @@ static META: RuleMeta = RuleMeta {
     id: "STRUCT.PAGE_TREE_CYCLE",
     category: Category::Structure,
     severity: Severity::High,
-    default_action: Action::Warn,
+    default_action: Action::Block,
     locked: false,
     stage: Stage::Stable,
     since: "0.1.0",

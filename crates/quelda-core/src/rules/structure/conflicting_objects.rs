@@ -10,7 +10,7 @@ static META: RuleMeta = RuleMeta {
     id: "STRUCT.CONFLICTING_OBJECTS",
     category: Category::Structure,
     severity: Severity::Medium,
-    default_action: Action::Warn,
+    default_action: Action::Block,
     locked: false,
     stage: Stage::Stable,
     since: "0.1.0",

@@ -9,7 +9,7 @@ static META: RuleMeta = RuleMeta {
     id: "STRUCT.MULTIPLE_HEADERS",
     category: Category::Structure,
     severity: Severity::Medium,
-    default_action: Action::Warn,
+    default_action: Action::Block,
     locked: false,
     stage: Stage::Stable,
     since: "0.1.0",

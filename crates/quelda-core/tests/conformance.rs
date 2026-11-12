@@ -25,13 +25,13 @@ fn tests_dir(sub: &str) -> PathBuf {
     dir
 }
 
-/// The registry is exactly the v0.1 rule set the expectations are written for.
+/// The registry is exactly the rule set the expectations are written for.
 #[test]
-fn registry_is_the_whole_v01_rule_set() {
+fn registry_is_the_whole_rule_set() {
     let registered: BTreeSet<&str> = list_rules().iter().map(|r| r.id).collect();
     let spec: BTreeSet<&str> = quelda_testkit::rules::RULES.iter().map(|r| r.id).collect();
     assert_eq!(registered, spec);
-    assert_eq!(registered.len(), 53);
+    assert_eq!(registered.len(), 56);
 }
 
 fn ids(v: &Value) -> Vec<String> {

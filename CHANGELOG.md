@@ -8,6 +8,51 @@ engine share one version.
 Rule IDs never change meaning or disappear. A new rule, or a rule that starts to
 match more files, is listed under **Rules** because it can change verdicts.
 
+## [Unreleased]
+
+### Rules
+
+Measured on 7,076 real files (5,233 attack files from CIC-Evasive-PDFMal2022 and the PDF
+Insecurity collections, 1,828 ordinary files). With the default preset, ordinary files
+rejected by a rule's mistake went from 75 to 0, and attack files accepted from 342 to 239;
+no file lost a correct verdict in any preset. **Verdicts change**: files that 0.3.0 accepted
+with a warning can now be rejected.
+
+Three new rules (56 in all):
+
+- `STRUCT.BROKEN_OBJECT` (new; block, block, warn): an object header (`N G obj`) whose body
+  cannot be parsed, as in a file cut off in the middle. quelda could not inspect such an
+  object and said nothing. Header text inside a string, a comment or stream data is not
+  counted.
+- `STRUCT.REFERENCE_CYCLE` (new; block, block, warn): a loop in a bookmark or action chain
+  (`/Next`, `/First`), in object streams linked by `/Extends`, or in arrays that contain
+  themselves. Naive readers hang or run out of memory.
+- `CODEC.ICC_UNRECOGNIZED` (new; block, warn, off): colour profile data without the `acsp`
+  signature. This was part of `CODEC.ICC_MALFORMED` and blocked real files (an empty
+  profile stream, a byte-swapped header).
+
+Rules that reject more by default (were block, warn, off; now block, block, warn):
+
+- `EXTERNAL.REMOTE_GOTO`, `EXTERNAL.SUBMIT_FORM`, `EXTERNAL.IMPORT_DATA`,
+  `EXTERNAL.URL_FILESPEC`: opening another file, sending form data to a URL, reading a file
+  from the network. `EXTERNAL.URI` (web links) still only warns.
+- `EXTERNAL.REMOTE_GOTO` also matches a thread action that names a file (`/S /Thread` with
+  `/F`).
+- `FORMS.XFA`.
+- `STRUCT.MISSING_EOF`, `STRUCT.MULTIPLE_HEADERS`, `STRUCT.CONFLICTING_OBJECTS`,
+  `STRUCT.PAGE_TREE_CYCLE`.
+
+To keep the 0.3.0 behaviour for one of them: `{ "rules": { "FORMS.XFA": "warn" } }`.
+
+Rules that reject less:
+
+- `EMBED.EMBEDDED_FILE`: an `/EF` entry that is an array is not an embedded file. Adobe
+  usage-rights signatures (Reader-enabled forms) list permission names under `/EF`.
+- `STRUCT.NAME_TOO_LONG`: the limit is 255 bytes, not 127. Word writes its style names as
+  structure tags, some longer than 127 bytes.
+- `CODEC.ICC_MALFORMED`: no longer reports a missing `acsp` signature (see
+  `CODEC.ICC_UNRECOGNIZED`).
+
 ## [0.3.0] — 2026-11-12
 
 ### Rules

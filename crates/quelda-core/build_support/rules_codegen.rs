@@ -73,6 +73,7 @@ pub enum MatchSpec {
 #[derive(Clone, Debug, PartialEq)]
 pub enum DictSpec {
     Key(String),
+    IsDict(String),
     Name { key: String, name: String },
     NameIn { key: String, names: Vec<String> },
     Int { key: String, value: i64 },
@@ -330,9 +331,9 @@ fn parse_dict(v: &toml::Value) -> Result<DictSpec, String> {
         });
     }
     for k in t.keys() {
-        if !["key", "name", "name_in", "int"].contains(&k.as_str()) {
+        if !["key", "name", "name_in", "int", "is"].contains(&k.as_str()) {
             return Err(format!(
-                "unknown field `{k}` (expected key, name, name_in, int, all, any)"
+                "unknown field `{k}` (expected key, name, name_in, int, is, all, any)"
             ));
         }
     }
@@ -340,6 +341,15 @@ fn parse_dict(v: &toml::Value) -> Result<DictSpec, String> {
         Some(k) if !k.is_empty() => k.to_string(),
         _ => return Err("`key` (non-empty string) is required".into()),
     };
+    if let Some(kind) = t.get("is") {
+        if t.len() != 2 {
+            return Err("use at most one of `name`, `name_in`, `int`, `is`".into());
+        }
+        return match kind.as_str() {
+            Some("dict") => Ok(DictSpec::IsDict(key)),
+            _ => Err("`is` must be \"dict\"".into()),
+        };
+    }
     match (t.get("name"), t.get("name_in"), t.get("int")) {
         (None, None, None) => Ok(DictSpec::Key(key)),
         (Some(n), None, None) => match n.as_str() {
@@ -481,6 +491,9 @@ fn dict_code(d: &DictSpec, out: &mut String) {
     match d {
         DictSpec::Key(k) => {
             let _ = write!(out, "{p}::Key({k:?})");
+        }
+        DictSpec::IsDict(k) => {
+            let _ = write!(out, "{p}::IsDict({k:?})");
         }
         DictSpec::Name { key, name } => {
             let _ = write!(out, "{p}::Name {{ key: {key:?}, name: {name:?} }}");
@@ -789,6 +802,10 @@ match = { dict = { key = "S", name = "Launch" } }
             Ok(MatchSpec::Dict(Key(k("JS"))))
         );
         assert_eq!(
+            matcher(r#"{ dict = { key = "EF", is = "dict" } }"#),
+            Ok(MatchSpec::Dict(IsDict(k("EF"))))
+        );
+        assert_eq!(
             matcher(r#"{ dict = { key = "Subtype", name_in = ["RichMedia", "Movie"] } }"#),
             Ok(MatchSpec::Dict(NameIn {
                 key: k("Subtype"),
@@ -861,6 +878,11 @@ match = { dict = { key = "S", name = "Launch" } }
                 "non-empty array",
             ),
             (r#"{ dict = { key = "S", int = 1.5 } }"#, "integer"),
+            (r#"{ dict = { key = "S", is = "array" } }"#, "`is` must be"),
+            (
+                r#"{ dict = { key = "S", is = "dict", name = "A" } }"#,
+                "at most one",
+            ),
             (r#"{ dict = { all = [] } }"#, "must not be empty"),
             (
                 r#"{ dict = { all = [ { key = "A" } ], key = "B" } }"#,

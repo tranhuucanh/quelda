@@ -151,7 +151,7 @@ fn opi() -> Vec<Fixture> {
 
 fn name_too_long() -> Vec<Fixture> {
     const R: &str = "STRUCT.NAME_TOO_LONG";
-    let long = format!("QueldaTest{}", "X".repeat(190));
+    let long = format!("QueldaTest{}", "X".repeat(290));
     let font = |name: &str| format!("<< /Type /Font /Subtype /Type1 /BaseFont /{name} >>");
     // Object 11: a second font, used only by union scan.
     let with_font = |name: &str| {
@@ -184,14 +184,14 @@ fn name_too_long() -> Vec<Fixture> {
             "plain",
             with_font(&long).build(),
             &[],
-            "Font /BaseFont of 200 bytes",
+            "Font /BaseFont of 300 bytes",
         ),
         bad(
             R,
             "name-encoded",
-            with_font(&format!("QueldaTest{}", "#58".repeat(190))).build(),
+            with_font(&format!("QueldaTest{}", "#58".repeat(290))).build(),
             &[],
-            "200 bytes once `#58` is decoded",
+            "300 bytes once `#58` is decoded",
         ),
         bad(
             R,
@@ -214,12 +214,33 @@ fn name_too_long() -> Vec<Fixture> {
             &[],
             "Long font resource name as a `Tf` operand",
         ),
+        bad(
+            R,
+            "256-bytes",
+            with_font(&"Q".repeat(256)).build(),
+            &[],
+            "Name of 256 bytes (one over the limit)",
+        ),
         good(
             R,
-            "127-bytes",
-            with_font(&"Q".repeat(127)).build(),
+            "255-bytes",
+            with_font(&"Q".repeat(255)).build(),
             &[],
-            "Name of exactly 127 bytes (the limit)",
+            "Name of exactly 255 bytes (the limit)",
+        ),
+        good(
+            R,
+            "word-style-structure-type",
+            {
+                // Word writes the paragraph style name as the structure type.
+                let style = format!("Footnote#20Text{}", ",Footnote#20Text#20Char".repeat(10));
+                let mut b = Doc::new().builder();
+                b.object(11, format!("<< /Type /StructElem /S /{style} /P 12 0 R >>"))
+                    .object(12, "<< /Type /StructTreeRoot /K [11 0 R] >>");
+                b.build()
+            },
+            &[],
+            "Structure type of about 240 bytes, as Word writes (real files: 171 to 253 bytes)",
         ),
         good(
             R,
@@ -237,7 +258,7 @@ fn name_too_long() -> Vec<Fixture> {
                 d.build()
             },
             &[],
-            "200-byte string (strings have no such limit)",
+            "300-byte string (strings have no such limit)",
         ),
     ]
 }

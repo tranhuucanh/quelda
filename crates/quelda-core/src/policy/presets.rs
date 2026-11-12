@@ -53,7 +53,7 @@ const CATEGORIES: [(Category, [Action; 3]); 11] = [
 
 /// Rules whose preset action differs from their category's (design §6.2).
 /// The `balanced` column must equal the rule's `default_action`.
-const RULES: [(&str, [Action; 3]); 9] = [
+const RULES: [(&str, [Action; 3]); 20] = [
     ("ACTIVE.OTHER_ACTIONS", [B, W, W]),
     ("STRUCT.INCREMENTAL_UPDATE", [W, O, O]),
     ("CODEC.TYPE1_FONT", [W, O, O]),
@@ -63,6 +63,19 @@ const RULES: [(&str, [Action; 3]); 9] = [
     ("CODEC.DECODE_PARAMS", [B, B, B]),
     ("CODEC.FONT_MALFORMED", [B, B, W]),
     ("CODEC.ICC_MALFORMED", [B, B, W]),
+    // 0.4.0: detected real attacks and no benign file in the 2026-11-12
+    // real-data measurement, so they block in `balanced` too.
+    ("EXTERNAL.REMOTE_GOTO", [B, B, W]),
+    ("EXTERNAL.SUBMIT_FORM", [B, B, W]),
+    ("EXTERNAL.IMPORT_DATA", [B, B, W]),
+    ("EXTERNAL.URL_FILESPEC", [B, B, W]),
+    ("STRUCT.MISSING_EOF", [B, B, W]),
+    ("STRUCT.CONFLICTING_OBJECTS", [B, B, W]),
+    ("STRUCT.MULTIPLE_HEADERS", [B, B, W]),
+    ("STRUCT.PAGE_TREE_CYCLE", [B, B, W]),
+    ("STRUCT.BROKEN_OBJECT", [B, B, W]),
+    ("STRUCT.REFERENCE_CYCLE", [B, B, W]),
+    ("FORMS.XFA", [B, B, W]),
 ];
 
 /// Preset action of a category.
