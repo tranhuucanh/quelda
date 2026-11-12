@@ -8,6 +8,19 @@ engine share one version.
 Rule IDs never change meaning or disappear. A new rule, or a rule that starts to
 match more files, is listed under **Rules** because it can change verdicts.
 
+## [0.4.1] — 2026-11-12
+
+Documentation only: the engine, the rules and every verdict are the same as in 0.4.0.
+
+### Changed
+
+- Documentation in Japanese: the README (GitHub and npm), the CLI guide, policies and rules
+  (`README.ja.md`, `docs/*.ja.md`), with a link to the other language at the top of each.
+  The npm package now also contains `README.ja.md`.
+- README (GitHub and npm): the summary says what quelda is for (same verdicts in the browser
+  and on the server, self-contained, clear reasons, easy to tune).
+- The "modes" links of the README summary now go to the Modes section on GitHub.
+
 ## [0.4.0] — 2026-11-12
 
 ### Rules

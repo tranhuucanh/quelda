@@ -636,7 +636,7 @@ dependencies = [
 
 [[package]]
 name = "quelda-cli"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "assert_cmd",
  "jsonschema",
@@ -647,7 +647,7 @@ dependencies = [
 
 [[package]]
 name = "quelda-core"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "flate2",
  "jsonschema",
@@ -662,7 +662,7 @@ dependencies = [
 
 [[package]]
 name = "quelda-eval"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "libc",
  "quelda-core",
@@ -672,7 +672,7 @@ dependencies = [
 
 [[package]]
 name = "quelda-testkit"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "miniz_oxide",
  "serde_json",
@@ -680,7 +680,7 @@ dependencies = [
 
 [[package]]
 name = "quelda-wasm"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "quelda-core",
  "serde_json",
