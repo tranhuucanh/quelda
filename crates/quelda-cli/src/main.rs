@@ -374,19 +374,20 @@ mod tests {
         };
         // A warning raised to block, and back off.
         let (code, violations, _, err) =
-            status(&["scan", "-", "--rule", "STRUCT.MISSING_EOF=block"]);
+            status(&["scan", "-", "--rule", "STRUCT.XREF_MISMATCH=block"]);
         assert_eq!(code, EXIT_REJECT);
         assert!(
-            violations.contains(&"STRUCT.MISSING_EOF".to_string()),
+            violations.contains(&"STRUCT.XREF_MISMATCH".to_string()),
             "{violations:?}"
         );
         assert!(err.is_empty(), "{err}");
-        let (_, violations, warnings, _) = status(&["scan", "-", "--rule=STRUCT.MISSING_EOF=off"]);
+        let (_, violations, warnings, _) =
+            status(&["scan", "-", "--rule=STRUCT.XREF_MISMATCH=off"]);
         assert!(
             !violations
                 .iter()
                 .chain(&warnings)
-                .any(|r| r == "STRUCT.MISSING_EOF")
+                .any(|r| r == "STRUCT.XREF_MISMATCH")
         );
         // A locked rule turned off: still blocks, and stderr says why.
         let (code, violations, _, err) =
@@ -407,6 +408,8 @@ mod tests {
             "FILETYPE.POSTSCRIPT_MAGIC=warn",
             "--rule",
             "FILETYPE.NOT_PDF_HEADER=off",
+            "--rule",
+            "STRUCT.MISSING_EOF=warn",
         ]);
         assert_eq!((code, err.as_str()), (EXIT_PASS, ""));
         assert!(warnings.contains(&"FILETYPE.POSTSCRIPT_MAGIC".to_string()));

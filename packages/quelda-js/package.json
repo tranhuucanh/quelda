@@ -1,6 +1,6 @@
 {
   "name": "quelda",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "PDF & Illustrator security scanner (WebAssembly): files + policy in, verdict out",
   "license": "MIT",
   "author": "0xTh3OKrypt <tranhuucanh39@gmail.com>",

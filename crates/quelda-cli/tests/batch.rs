@@ -585,8 +585,8 @@ fn csv_quotes_and_defuses_formulas() {
         [
             "REJECT",
             "false",
-            "FILETYPE.NOT_PDF_HEADER",
-            "STRUCT.MISSING_EOF STRUCT.XREF_MISMATCH",
+            "FILETYPE.NOT_PDF_HEADER STRUCT.MISSING_EOF",
+            "STRUCT.XREF_MISMATCH",
             ""
         ]
     );

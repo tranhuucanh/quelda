@@ -1850,6 +1850,62 @@ fn batch_b_variants() -> Vec<Fixture> {
             &[],
             "String",
         ),
+        good(
+            EMBED,
+            "usage-rights-ef",
+            {
+                // Reader-extensions signature: /EF lists permissions.
+                let mut b = Doc::new().builder();
+                b.object(
+                    11,
+                    "<< /Type /Sig /Filter /Adobe.PPKLite /Reference [ << /Type /SigRef \
+                     /TransformMethod /UR3 /TransformParams << /Type /TransformParams /V /2.2 \
+                     /Document [/FullSave] /Form [/Add /Delete /FillIn /Import /Export] \
+                     /EF [/Create /Delete /Modify /Import] >> >> ] >>",
+                );
+                b.build()
+            },
+            &[],
+            "Usage-rights TransformParams: /EF is an array of permission names, not an attachment",
+        ),
+        good(
+            EMBED,
+            "usage-rights-ef-indirect",
+            {
+                let mut b = Doc::new().builder();
+                b.object(11, "<< /Type /TransformParams /V /2.2 /EF 12 0 R >>")
+                    .object(12, "[/Create /Delete /Modify /Import]");
+                b.build()
+            },
+            &[],
+            "/EF is a reference to an array of permission names",
+        ),
+        bad(
+            EMBED,
+            "ef-duplicate-key",
+            {
+                let mut b = Doc::new().builder();
+                b.object(
+                    11,
+                    "<< /Type /Filespec /F (quelda-test.txt) /EF [/Create] /EF << /F 10 0 R >> >>",
+                )
+                .stream(10, "", b"quelda-test\n", &[]);
+                b.build()
+            },
+            &[],
+            "Duplicate /EF: an array first, the real dictionary second",
+        ),
+        bad(
+            EMBED,
+            "ef-unresolved-reference",
+            {
+                let mut b = Doc::new().builder();
+                b.object(11, "<< /Type /Filespec /F (quelda-test.txt) /EF 30 0 R >>");
+                b.build()
+            },
+            &[],
+            "/EF is a reference no object defines: not known to be harmless, so counted",
+        ),
         bad(
             RICH,
             "subtype-u3d",

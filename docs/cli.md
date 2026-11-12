@@ -208,7 +208,7 @@ stderr, so stdout stays machine-readable.
 **Speed**: files are scanned in parallel, one per CPU core. On an Apple M2 Pro (10 cores),
 5,820 files in nested folders (8 GB) take 6 s; one file at a time (`-j 1`) takes 26 s.
 **Memory**: each file being scanned needs its own memory (a few MB for most files, a few
-hundred MB for the [heaviest](../README.md#speed-and-memory)); the 5,820 files above peaked at
+hundred MB for the [heaviest](../README.md#-speed-and-memory)); the 5,820 files above peaked at
 370 MB. Lower `-j` to cap memory on a small server.
 
 To scan one PDF passed with a single name, nothing changes: `quelda scan upload.pdf` prints

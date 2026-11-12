@@ -1,6 +1,6 @@
 # Rules
 
-quelda has **53 rules in 11 categories**. Each one looks for one thing that attackers use against
+quelda has **56 rules in 11 categories**. Each one looks for one thing that attackers use against
 PDF readers and server-side PDF tools (Ghostscript, ImageMagick, print RIPs, thumbnailers), or
 that makes different PDF software see different documents. On top of the rules, the engine
 refuses to judge what it cannot fully inspect (see [engine errors](policy.md#engine-errors)).
@@ -75,7 +75,7 @@ Payloads carried inside the PDF.
 
 | Rule | Catches | strict | balanced | permissive |
 |---|---|---|---|---|
-| `EMBED.EMBEDDED_FILE` | Embedded files of any kind (executables, scripts, other documents), however they are referenced. | block | block | warn |
+| `EMBED.EMBEDDED_FILE` | Embedded files of any kind (executables, scripts, other documents), however they are referenced. The `/EF` array of an Adobe usage-rights signature (a list of permission names, not a file) is not counted. | block | block | warn |
 | `EMBED.FILE_ATTACHMENT` | File attachment annotations: an icon on a page that opens an attached file. | block | block | warn |
 | `EMBED.PORTFOLIO` | PDF Portfolios, containers whose real content is their attached files. | block | block | warn |
 | `EMBED.RICH_MEDIA` | Multimedia and 3D content (RichMedia, Movie, Sound, Screen, U3D, PRC), handled by large and rarely audited players. | block | block | warn |
@@ -86,13 +86,13 @@ Ways a document reaches out to the network or to other files.
 
 | Rule | Catches | strict | balanced | permissive |
 |---|---|---|---|---|
-| `EXTERNAL.IMPORT_DATA` | Forms that load their values from an external file. | block | warn | off |
+| `EXTERNAL.IMPORT_DATA` | Forms that load their values from an external file. | block | block | warn |
 | `EXTERNAL.OPI` | OPI comments on an image or form: prepress software swaps the content for a file on its own disk or network, named by the PDF. Modern tools do not write them. | block | block | warn |
-| `EXTERNAL.REMOTE_GOTO` | Links that open another document, possibly over the network (UNC/SMB paths leak Windows credentials), or an attachment. | block | warn | off |
+| `EXTERNAL.REMOTE_GOTO` | Links that open another document, possibly over the network (UNC/SMB paths leak Windows credentials), or an attachment: `GoToR`, `GoToE`, and thread actions that name a file. Ordinary documents link to web pages, not to other files. | block | block | warn |
 | `EXTERNAL.STREAM_FILE` | Images or other content read from a file outside the PDF (external streams, reference XObjects): a renderer opens a path or URL chosen by the file, and what prints is not what was checked. Real print files embed their images. | block | block | warn |
-| `EXTERNAL.SUBMIT_FORM` | Forms that send their data (or the whole document) to a URL: data exfiltration and phishing. | block | warn | off |
+| `EXTERNAL.SUBMIT_FORM` | Forms that send their data (or the whole document) to a URL: data exfiltration and phishing. | block | block | warn |
 | `EXTERNAL.URI` | Web links. Common in normal documents (so `balanced` only warns), and what phishing documents rely on. | block | warn | off |
-| `EXTERNAL.URL_FILESPEC` | File references that point at a URL, so the file is fetched from the network. | block | warn | off |
+| `EXTERNAL.URL_FILESPEC` | File references that point at a URL, so the file is fetched from the network. | block | block | warn |
 
 ## Forms (`forms`)
 
@@ -101,7 +101,7 @@ Interactive forms.
 | Rule | Catches | strict | balanced | permissive |
 |---|---|---|---|---|
 | `FORMS.ACROFORM` | Interactive (fillable) forms. Their scripts and submit actions are reported by their own rules. | block | warn | off |
-| `FORMS.XFA` | XFA forms: a separate XML layout and scripting engine inside the PDF, with a large attack surface. | block | warn | off |
+| `FORMS.XFA` | XFA forms: a separate XML layout and scripting engine inside the PDF, with a large attack surface. Deprecated in PDF 2.0; only Adobe readers still run it. | block | block | warn |
 
 ## XML (`xml`)
 
@@ -118,13 +118,15 @@ Damaged, ambiguous or unusual file structure: where different PDF readers start 
 
 | Rule | Catches | strict | balanced | permissive |
 |---|---|---|---|---|
-| `STRUCT.CONFLICTING_OBJECTS` | The same object defined twice with different content in one revision: which one a reader uses depends on its repair logic. | block | warn | off |
+| `STRUCT.BROKEN_OBJECT` | An object header (`N G obj`) whose body cannot be parsed: a file cut off in the middle, or damaged on purpose. quelda cannot inspect what it holds, while a reader that repairs files may still use part of it. Text that only looks like a header (inside a string, a comment or stream data) is not counted. | block | block | warn |
+| `STRUCT.CONFLICTING_OBJECTS` | The same object defined twice with different content in one revision: which one a reader uses depends on its repair logic. | block | block | warn |
 | `STRUCT.FILTER_CHAIN` | Streams that stack more than `thresholds.max_filter_chain` compression/encoding filters or repeat one: used to hide content and multiply decoding work. | block | warn | off |
 | `STRUCT.INCREMENTAL_UPDATE` | The file was edited after it was created (incremental updates). quelda already scans every revision; this only reports that there are several. | warn | off | off |
-| `STRUCT.MISSING_EOF` | No `%%EOF` at all: a truncated or hand-crafted file that readers repair differently. | block | warn | off |
-| `STRUCT.MULTIPLE_HEADERS` | More than one `%PDF-` header: concatenated files, or a file built to look different from the front and from the back. | block | warn | off |
-| `STRUCT.NAME_TOO_LONG` | Names longer than 127 bytes (the PDF limit readers build for): long font names have overflowed buffers in renderers. Producers never write them. | block | block | block |
-| `STRUCT.PAGE_TREE_CYCLE` | Loops or repeated nodes in the page tree, which make naive readers loop forever or render a few objects as millions of pages. | block | warn | off |
+| `STRUCT.MISSING_EOF` | No `%%EOF` at all: a truncated or hand-crafted file that readers repair differently. | block | block | warn |
+| `STRUCT.MULTIPLE_HEADERS` | More than one `%PDF-` header: concatenated files, or a file built to look different from the front and from the back. | block | block | warn |
+| `STRUCT.NAME_TOO_LONG` | Names longer than 255 bytes: long font names have overflowed buffers in renderers. Producers do not write them (the longest names in real files, structure tags copied from Word style names, stay under 255). | block | block | block |
+| `STRUCT.PAGE_TREE_CYCLE` | Loops or repeated nodes in the page tree, which make naive readers loop forever or render a few objects as millions of pages. | block | block | warn |
+| `STRUCT.REFERENCE_CYCLE` | Chains that readers follow to their end, made to never end: bookmarks or actions linked by `/Next`, object streams linked by `/Extends`, arrays that contain themselves. Naive readers hang or run out of memory. Ordinary back references (`/Parent`, `/Prev`) are not counted. | block | block | warn |
 | `STRUCT.SIGNATURE_MODIFIED` | A signed file changed after signing: bytes after the signed ranges (an update saved later, which can change what is shown while the signature still verifies), signed ranges that leave out more than the signature value, or a malformed `/ByteRange`. Only the structure is checked, not the cryptography. Filling a form or adding a second signature also adds bytes, so `balanced` only warns. | block | warn | off |
 | `STRUCT.PRINT_VIEW_MISMATCH` | Content that prints but is hidden on screen (annotations flagged print-only, layers ON for print and OFF for view): what is approved on screen is not what is printed. Some real files have print-only stamps, so `balanced` only warns. | block | warn | off |
 | `STRUCT.TRAILING_DATA` | More than `thresholds.max_trailing_bytes` of data after the last `%%EOF`: how polyglots and smuggled payloads are usually built. | block | warn | off |
@@ -147,7 +149,8 @@ Decoders and parsers with a history of exploits: images, fonts, colour profiles.
 |---|---|---|---|---|
 | `CODEC.DECODE_PARAMS` | Decoder parameters outside the spec (predictor, colours, bits per component, columns, rows): decoders size their buffers from them, and out-of-range values have caused overflows. Real files pass. | block | block | block |
 | `CODEC.FONT_MALFORMED` | Embedded TrueType, OpenType or CFF fonts whose tables or indexes point outside the font (a classic way to overflow font parsers in renderers and printers). Font tools never write them; a font that does not decode completely is not judged. | block | block | warn |
-| `CODEC.ICC_MALFORMED` | Embedded ICC colour profiles without the `acsp` signature, with a tag table that does not fit, or with tags past the end of the profile: colour engines read tags at the offsets the profile gives. A truncated profile (some OCR tools embed one) is not judged by its tags. | block | block | warn |
+| `CODEC.ICC_MALFORMED` | Embedded ICC colour profiles with a tag table that does not fit, or with tags past the end of the profile: colour engines read tags at the offsets the profile gives. A truncated profile (some OCR tools embed one) is not judged by its tags; data without the `acsp` signature is `CODEC.ICC_UNRECOGNIZED`'s. | block | block | warn |
+| `CODEC.ICC_UNRECOGNIZED` | Embedded colour profile data that does not carry the `acsp` signature every ICC profile has: quelda cannot check it, a colour engine should refuse it. A few real producers write such profiles (an empty stream, a byte-swapped header), so `balanced` only warns. | block | warn | off |
 | `CODEC.JBIG2` | Images compressed with JBIG2, whose decoders were exploited in the wild (FORCEDENTRY, CVE-2009-0658). | block | warn | off |
 | `CODEC.JPX` | Images compressed with JPEG 2000, whose decoders have a long history of memory-safety bugs. | block | warn | off |
 | `CODEC.TYPE1_FONT` | Embedded Type 1 (PostScript) font programs. Off in `balanced` because print files use them a lot. | warn | off | off |

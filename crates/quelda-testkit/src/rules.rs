@@ -109,20 +109,20 @@ pub const RULES: &[RuleSpec] = &[
     r("EMBED.RICH_MEDIA"),
     r("EMBED.PORTFOLIO"),
     r("EXTERNAL.URI"),
-    r("EXTERNAL.REMOTE_GOTO"),
-    r("EXTERNAL.SUBMIT_FORM"),
-    r("EXTERNAL.IMPORT_DATA"),
-    r("EXTERNAL.URL_FILESPEC"),
-    r("FORMS.XFA"),
+    custom("EXTERNAL.REMOTE_GOTO", [B, B, W]),
+    custom("EXTERNAL.SUBMIT_FORM", [B, B, W]),
+    custom("EXTERNAL.IMPORT_DATA", [B, B, W]),
+    custom("EXTERNAL.URL_FILESPEC", [B, B, W]),
+    custom("FORMS.XFA", [B, B, W]),
     r("FORMS.ACROFORM"),
     r("XML.DOCTYPE"),
     r("STRUCT.TRAILING_DATA"),
-    r("STRUCT.MISSING_EOF"),
+    custom("STRUCT.MISSING_EOF", [B, B, W]),
     r("STRUCT.XREF_MISMATCH"),
-    r("STRUCT.CONFLICTING_OBJECTS"),
+    custom("STRUCT.CONFLICTING_OBJECTS", [B, B, W]),
     custom("STRUCT.INCREMENTAL_UPDATE", [W, O, O]),
-    r("STRUCT.MULTIPLE_HEADERS"),
-    r("STRUCT.PAGE_TREE_CYCLE"),
+    custom("STRUCT.MULTIPLE_HEADERS", [B, B, W]),
+    custom("STRUCT.PAGE_TREE_CYCLE", [B, B, W]),
     r("STRUCT.FILTER_CHAIN"),
     r("STRUCT.TRUNCATED_STREAM"),
     r("RESOURCE.IMAGE_DIMENSIONS"),
@@ -147,6 +147,10 @@ pub const RULES: &[RuleSpec] = &[
     r("XML.EXTERNAL_REFERENCE"),
     r("RESOURCE.DRAW_RECURSION"),
     r("RESOURCE.FUNCTION_SIZE"),
+    // 0.4.0
+    r("CODEC.ICC_UNRECOGNIZED"),
+    custom("STRUCT.BROKEN_OBJECT", [B, B, W]),
+    custom("STRUCT.REFERENCE_CYCLE", [B, B, W]),
 ];
 
 /// Looks up a rule by ID.
@@ -222,12 +226,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn rule_set_has_53_unique_well_formed_ids() {
-        assert_eq!(RULES.len(), 53);
+    fn rule_set_has_56_unique_well_formed_ids() {
+        assert_eq!(RULES.len(), 56);
         let mut ids: Vec<&str> = RULES.iter().map(|r| r.id).collect();
         ids.sort_unstable();
         ids.dedup();
-        assert_eq!(ids.len(), 53, "duplicate rule ID");
+        assert_eq!(ids.len(), 56, "duplicate rule ID");
         for id in ids {
             let (cat, name) = id.split_once('.').expect("CATEGORY.NAME");
             assert!(

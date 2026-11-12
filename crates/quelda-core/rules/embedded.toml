@@ -10,8 +10,8 @@ locked = false
 stage = "stable"
 since = "0.1.0"
 message = "Document contains an embedded file"
-description = "An embedded file stream (/Type /EmbeddedFile), a file specification with an /EF (embedded file) entry, or an /EmbeddedFiles name tree (ISO 32000-2 §7.11.4). /Type is optional on embedded file streams, so /EF is checked too. Attachments can carry any payload (executables, scripts, other documents) that a user or a downstream tool may open."
-match = { dict = { any = [ { key = "Type", name = "EmbeddedFile" }, { key = "EF" }, { key = "EmbeddedFiles" } ] } }
+description = "An embedded file stream (/Type /EmbeddedFile), a file specification with an /EF (embedded file) entry, or an /EmbeddedFiles name tree (ISO 32000-2 §7.11.4). /Type is optional on embedded file streams, so /EF is checked too: when its value is a dictionary, as in a file specification (the /EF array of a usage-rights signature only lists permissions and is not an attachment). Attachments can carry any payload (executables, scripts, other documents) that a user or a downstream tool may open."
+match = { dict = { any = [ { key = "Type", name = "EmbeddedFile" }, { key = "EF", is = "dict" }, { key = "EmbeddedFiles" } ] } }
 
 [[rule]]
 id = "EMBED.FILE_ATTACHMENT"

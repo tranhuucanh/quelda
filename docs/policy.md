@@ -35,7 +35,7 @@ Anything you do not name keeps its preset action. So this policy:
 }
 ```
 
-means: *all 53 rules run with the `strict` actions, except that the `external` category only
+means: *all 56 rules run with the `strict` actions, except that the `external` category only
 warns, and `EXTERNAL.URI` (ordinary hyperlinks) is ignored*. It does **not** mean "run only the
 external rules". A rule set to `off` is skipped; there is no way to add rules through a policy.
 
@@ -69,7 +69,7 @@ turn these off; it can only raise the [limits](#limits). See [Engine errors](#en
 | `structure` | Damaged or ambiguous structure (xref, duplicates, trailing data, …) | block | warn | off |
 | `codecs` | Risky image codecs (JBIG2, JPEG 2000), fonts and colour profiles | block | warn | off |
 
-Nine rules differ from their category:
+Twenty rules differ from their category:
 
 | Rule | strict | balanced | permissive | Why |
 |---|---|---|---|---|
@@ -82,6 +82,17 @@ Nine rules differ from their category:
 | `CODEC.DECODE_PARAMS` | block | block | block | Never written by real producers; aimed at decoder buffers. |
 | `CODEC.FONT_MALFORMED` | block | block | warn | Font tools never write them; `permissive` only warns, for archives of old, damaged files. |
 | `CODEC.ICC_MALFORMED` | block | block | warn | Same, for colour profiles. |
+| `EXTERNAL.REMOTE_GOTO` | block | block | warn | Opening another file, or a network path, is not what a web link does; ordinary documents do not. |
+| `EXTERNAL.SUBMIT_FORM` | block | block | warn | Sends what the user typed to a URL the file chose. |
+| `EXTERNAL.IMPORT_DATA` | block | block | warn | Loads form values from a file the PDF names. |
+| `EXTERNAL.URL_FILESPEC` | block | block | warn | A file fetched from the network when the document is used. |
+| `FORMS.XFA` | block | block | warn | A second scripting engine, deprecated in PDF 2.0. Old government and bank forms can use `permissive`. |
+| `STRUCT.MISSING_EOF` | block | block | warn | A truncated or hand-built file; producers always write `%%EOF`. |
+| `STRUCT.MULTIPLE_HEADERS` | block | block | warn | Two files in one: readers disagree on which they show. |
+| `STRUCT.CONFLICTING_OBJECTS` | block | block | warn | Which definition is used depends on the reader. |
+| `STRUCT.PAGE_TREE_CYCLE` | block | block | warn | Never written by real producers; hangs readers. |
+| `STRUCT.REFERENCE_CYCLE` | block | block | warn | Same, for bookmark, action, object stream and array chains. |
+| `STRUCT.BROKEN_OBJECT` | block | block | warn | quelda cannot inspect an object it cannot parse. |
 
 **Locked rules** block in every preset (even `permissive`, where their category would only warn):
 `FILETYPE.POSTSCRIPT_MAGIC`, `FILETYPE.NOT_PDF_HEADER`, `FILETYPE.FOREIGN_MAGIC`,

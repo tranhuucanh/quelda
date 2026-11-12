@@ -139,6 +139,10 @@ pub struct BrokenObject {
     pub offset: usize,
     pub id: ObjRef,
     pub error: ParseError,
+    /// The header is text of something else: it lies inside a parsed
+    /// top-level object (a string, a comment, stream data) or on a comment
+    /// line between objects.
+    pub enclosed: bool,
 }
 
 /// Structure facts for `STRUCT.*` rules.
@@ -213,6 +217,7 @@ impl Document {
                 by_id: ById::default(),
             },
             offsets: HashMap::new(),
+            extents: Vec::new(),
             section_at: HashMap::new(),
             full: false,
             issued: HashSet::new(),
@@ -229,6 +234,7 @@ impl Document {
         b.xref_facts();
         b.duplicate_facts();
         b.doc.facts.linearized = b.linearized();
+        b.mark_enclosed();
         b.doc
     }
 
@@ -341,6 +347,9 @@ struct Builder<'a, 'b> {
     doc: Document,
     /// Top-level definitions by offset of `N`.
     offsets: HashMap<usize, Slot>,
+    /// Byte range (`N` to the end of the object) of every parsed top-level
+    /// definition.
+    extents: Vec<(usize, usize)>,
     /// Offsets already given to the object parser (each is parsed once).
     /// Requested section offset → section index (`None`: no section there).
     section_at: HashMap<usize, Option<usize>>,
@@ -427,6 +436,7 @@ impl<'a> Builder<'a, '_> {
                 if let Some(i) = self.object_at(o.offset) {
                     return Some(i);
                 }
+                self.extents.push((o.offset, o.end));
                 self.push(ObjectEntry {
                     id: o.id,
                     location: Location::File { offset: o.offset },
@@ -445,9 +455,51 @@ impl<'a> Builder<'a, '_> {
                         offset: start,
                         id,
                         error: e,
+                        enclosed: self.in_comment(start),
                     });
                 }
                 None
+            }
+        }
+    }
+
+    /// `offset` is on a comment line: a `%` between the start of its line
+    /// and it (only called for offsets outside every parsed object, where
+    /// `%` cannot be part of a string).
+    fn in_comment(&self, offset: usize) -> bool {
+        const LINE: usize = 1024;
+        let Some(before) = self.src.read(offset.saturating_sub(LINE)..offset) else {
+            return false;
+        };
+        before
+            .iter()
+            .rev()
+            .take_while(|&&c| c != b'\n' && c != b'\r')
+            .any(|&c| c == b'%')
+    }
+
+    /// Marks the broken objects whose header lies inside a parsed object.
+    fn mark_enclosed(&mut self) {
+        if self.doc.facts.broken_objects.is_empty() {
+            return;
+        }
+        let mut extents = std::mem::take(&mut self.extents);
+        for e in &self.doc.objects {
+            if let (Location::File { offset }, PdfObject::Stream(s)) = (&e.location, &e.object) {
+                extents.push((*offset, s.data.end));
+            }
+        }
+        extents.sort_unstable();
+        // Running maximum of the ends: objects may nest or overlap.
+        let mut reach = 0;
+        for e in &mut extents {
+            reach = reach.max(e.1);
+            e.1 = reach;
+        }
+        for b in &mut self.doc.facts.broken_objects {
+            let i = extents.partition_point(|&(start, _)| start < b.offset);
+            if i > 0 && b.offset < extents[i - 1].1 {
+                b.enclosed = true;
             }
         }
     }

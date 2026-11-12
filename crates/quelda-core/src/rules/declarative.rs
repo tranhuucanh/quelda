@@ -23,6 +23,10 @@ pub enum Match {
 pub enum DictMatch {
     /// The key is present.
     Key(&'static str),
+    /// The key's value is a dictionary or a stream, or a reference no object
+    /// defines (unknown: counted, fail-closed). An array, name, number or
+    /// string value does not match.
+    IsDict(&'static str),
     /// The key's value is this name.
     Name {
         key: &'static str,
@@ -48,6 +52,14 @@ impl DictMatch {
         };
         match *self {
             DictMatch::Key(key) => dict.contains_key(key),
+            DictMatch::IsDict(key) => dict.get_all(key).any(|v| {
+                let mut defined = false;
+                let is_dict = ctx.resolve(v).any(|o| {
+                    defined = true;
+                    matches!(o, PdfObject::Dict(_) | PdfObject::Stream(_))
+                });
+                is_dict || !defined
+            }),
             DictMatch::Name { key, name } => any_value(key, &|o| o.is_name(name)),
             DictMatch::NameIn { key, names } => {
                 any_value(key, &|o| names.iter().any(|n| o.is_name(n)))
@@ -145,6 +157,26 @@ mod tests {
     fn key() {
         let src = b"1 0 obj << /JS (x) >> endobj\n2 0 obj << /A << /JS 3 0 R >> >> endobj\n3 0 obj << /JSX 1 >> endobj\n4 0 obj (/JS) endobj";
         assert_eq!(dict(DictMatch::Key("JS"), src), vec!["1 0 0", "2 0 1"]);
+    }
+
+    #[test]
+    fn is_dict() {
+        // 1: direct dict; 2: reference to a dict; 3: array of names (usage
+        // rights); 4: reference to an array; 5: reference nothing defines;
+        // 6: duplicate key, one value a dict; 7: name.
+        let src = b"1 0 obj << /EF << /F 9 0 R >> >> endobj\n\
+            2 0 obj << /EF 8 0 R >> endobj\n\
+            3 0 obj << /EF [/Create /Delete] >> endobj\n\
+            4 0 obj << /EF 7 0 R >> endobj\n\
+            5 0 obj << /EF 99 0 R >> endobj\n\
+            6 0 obj << /EF [/Create] /EF << >> >> endobj\n\
+            10 0 obj << /EF /Create >> endobj\n\
+            7 0 obj [/Create] endobj\n\
+            8 0 obj << /F 9 0 R >> endobj";
+        assert_eq!(
+            dict(DictMatch::IsDict("EF"), src),
+            vec!["1 0 0", "2 0 0", "5 0 0", "6 0 0"]
+        );
     }
 
     #[test]

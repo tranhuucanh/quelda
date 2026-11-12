@@ -1,7 +1,16 @@
 # quelda — PDF & Illustrator security scanner
 
-quelda checks **PDF and Adobe Illustrator (`.ai`) files** for attacks, and runs **both on the
-client and on the server**, with the same engine, the same rules and the same verdict:
+quelda scans **PDF and Illustrator (`.ai`) files** for malicious content, with **one rule set
+for the browser and the server**:
+
+| Why quelda | |
+|---|---|
+| 🌐 **One engine, browser + server** | Same rules, same verdict in the browser and on your backend |
+| ⚡ **WebAssembly in the browser, near-native speed** | 500 PDF files in 0.82 s, without uploading them |
+| 🛡️ **Tested on real attacks** | ~32,000 real PDF files (malware, exploits, clean documents): 98.9 % of attacks rejected in strict mode, 0 clean files blocked by mistake ([results](#tested-on-real-attacks)) |
+| 🧱 **No crash on complex PDFs** | Tested on 900,000 objects, and 505,000 objects in 5,000 compressed object streams |
+| 🪶 **Fast and light** | One 1 GB PDF in 0.44 s with 3 MB of memory; a folder of 5,820 files (8 GB) in 6.3 s ([numbers](#-speed-and-memory)) |
+| 🎚️ **3 modes, any rule on/off** | `strict` · `balanced` · `permissive`, then `--rule EXTERNAL.URI=off` ([modes](#-modes-strict-balanced-permissive)) |
 
 | | Client (browser) | Server (backend) |
 |---|---|---|
@@ -13,16 +22,7 @@ client and on the server**, with the same engine, the same rules and the same ve
 It stops PostScript/EPS disguised as PDF, embedded PostScript, JavaScript, Launch actions,
 compression bombs and tampered structure, and says which rule each file breaks.
 
-## Documentation
-
-| Guide | Read it to |
-|---|---|
-| [**Rules**](docs/rules.md) | See every rule: what it catches, and whether it blocks, warns or is off in each preset |
-| [**Policies**](docs/policy.md) | Choose a preset, write your own policy, relax or tighten one rule, raise limits |
-| [**CLI**](docs/cli.md) | Install on a server or in Docker, options, exit codes, call it from Python, Ruby, Node.js, Go, PHP, Java |
-| [**npm package**](packages/quelda-js/README.md) | Use it in the browser: React, Vite, webpack, no bundler, CDN |
-
-## Speed and memory
+## ⚡ Speed and memory
 
 Scan time and peak memory of the CLI on an Apple M2 Pro, 10 cores.
 
@@ -62,9 +62,9 @@ document, and still answers in seconds, with bounded memory, without crashing:
 | 4 page streams, 480 MiB once decompressed | 53 MB | 3.0 s | 290 MB |
 | Arrays nested 100,000 levels deep (parser crash attack) | 0.2 MB | < 0.01 s | 2 MB |
 
-## What quelda checks
+## 🔍 What quelda checks
 
-**53 rules in 11 categories**, plus 12 engine safeguards that refuse to judge what cannot be
+**56 rules in 11 categories**, plus 12 engine safeguards that refuse to judge what cannot be
 fully inspected. Full list with explanations: [docs/rules.md](docs/rules.md).
 
 | Category | Rules | Catches, for example |
@@ -76,17 +76,33 @@ fully inspected. Full list with explanations: [docs/rules.md](docs/rules.md).
 | `external` | 7 | Links, remote documents (SMB credential leaks), form submission to a URL, network file references, images read from outside the file (external streams, OPI) |
 | `forms` | 2 | AcroForm and XFA forms |
 | `xml` | 2 | DOCTYPE/ENTITY in XMP or XFA (XXE, billion laughs), XInclude and other external references, in UTF-8/16/32 |
-| `structure` | 12 | Tampered or ambiguous structure: hidden revisions, conflicting objects, mismatched xref, page-tree loops, data after `%%EOF`, multiple headers, oversized names, content that prints but is hidden on screen, files changed after signing |
+| `structure` | 14 | Tampered or ambiguous structure: hidden revisions, conflicting objects, objects that cannot be parsed, mismatched xref, page-tree and bookmark loops, data after `%%EOF`, multiple headers, oversized names, content that prints but is hidden on screen, files changed after signing |
 | `encryption` | 1 | Encrypted files whose content cannot be inspected |
-| `codecs` | 6 | JBIG2 (FORCEDENTRY), JPEG 2000, Type 1 fonts, out-of-spec decoder parameters, malformed fonts and ICC colour profiles |
+| `codecs` | 7 | JBIG2 (FORCEDENTRY), JPEG 2000, Type 1 fonts, out-of-spec decoder parameters, malformed fonts and ICC colour profiles |
 | `resource` | 5 | Pixel bombs, gigantic or broken pages, page-count bombs, drawing loops, huge colour function tables |
 
-**Tested on thousands of cases**: attack variants of every rule, clean look-alikes that must not
-trigger a rule, damaged and disguised files, and real-world PDFs. The test files are not
-published, because antivirus software may flag them; if you need them, email the maintainer
-(tranhuucanh39@gmail.com).
+### Tested on real attacks
 
-## Modes: strict, balanced, permissive
+| Dataset | From | Contents |
+|---|---|---|
+| [CIC-Evasive-PDFMal2022](https://www.unb.ca/cic/datasets/pdfmal-2022.html) | Canadian Institute for Cybersecurity | Real malware and clean documents |
+| [PDF Insecurity](https://pdf-insecurity.org/) (incl. PDF101) | Ruhr University Bochum | Attacks on PDF readers, signatures and encryption |
+
+| ~32,000 files | balanced (default) | strict |
+|---|---|---|
+| 🔴 Attack files | ✅ 95.4 % rejected | ✅ 98.9 % rejected |
+| 🟢 Clean files | ✅ 0 rejected by a rule mistake | |
+
+- **Clean files rejected on purpose:** those that carry JavaScript, attachments or
+  encryption, which balanced blocks. Relax that one rule if your users need them.
+- **Attacks still accepted:** mostly phishing documents that are only a link (quelda cannot
+  judge a URL) and signed files changed after signing (a warning in balanced).
+
+Every rule is also tested on generated files: attack variants, clean look-alikes that must not
+trigger it, damaged and disguised files. The test files are not published, because antivirus
+software may flag them; if you need them, email the maintainer (tranhuucanh39@gmail.com).
+
+## 🎚️ Modes: strict, balanced, permissive
 
 **Every rule runs in every mode.** A mode (preset) only decides what a finding does:
 **block** (the file is rejected), **warn** (reported, the file is accepted) or **off**.
@@ -100,15 +116,25 @@ published, because antivirus software may flag them; if you need them, email the
 - **strict**: files from anyone go straight into Ghostscript, ImageMagick or a print RIP.
   Rejects anything unusual, including links, forms and damaged structure.
 - **balanced**: blocks everything that can execute code, carry a payload or overload a server;
-  only warns about features common in normal documents.
+  only warns about features common in normal documents (web links, form fields, edits).
 - **permissive**: files from sources you mostly trust.
 
 Locked rules (PostScript, Launch actions, files that are not PDF) block in every mode. Start
-from a mode, then change single rules: `{ "preset": "strict", "rules": { "EXTERNAL.URI": "warn" } }`.
+from a mode, then change single rules: `quelda scan file.pdf --preset strict --rule EXTERNAL.URI=warn`,
+or in a policy `{ "preset": "strict", "rules": { "EXTERNAL.URI": "warn" } }`.
 A few rules differ from their category; the action of every rule in every mode is in
 [rules.md](docs/rules.md), and how to write a policy in [policy.md](docs/policy.md).
 
-## Install
+## 📚 Documentation
+
+| Guide | Read it to |
+|---|---|
+| [**Rules**](docs/rules.md) | See every rule: what it catches, and whether it blocks, warns or is off in each preset |
+| [**Policies**](docs/policy.md) | Choose a preset, write your own policy, relax or tighten one rule, raise limits |
+| [**CLI**](docs/cli.md) | Install on a server or in Docker, options, exit codes, call it from Python, Ruby, Node.js, Go, PHP, Java |
+| [**npm package**](packages/quelda-js/README.md) | Use it in the browser: React, Vite, webpack, no bundler, CDN |
+
+## 📦 Install
 
 **macOS (Apple Silicon), with Homebrew:**
 
@@ -127,7 +153,7 @@ In a Docker image (ECS, Kubernetes, Cloud Run, …), pinning a version, checking
 building from source: [docs/cli.md](docs/cli.md#install). Every release ships `SHA256SUMS` and
 build provenance attestations.
 
-## Quick start
+## 🚀 Quick start
 
 ```bash
 quelda scan upload.pdf                          # JSON verdict on stdout
@@ -143,7 +169,7 @@ see [Scan a folder](docs/cli.md#scan-a-folder). From a backend, call it with an 
 array (no shell) and a timeout: see the examples for
 [Python, Ruby, Node.js, Go, PHP and Java](docs/cli.md#call-it-from-your-backend).
 
-## In the browser
+## 🌐 In the browser
 
 The same engine, compiled to WebAssembly, is on npm as
 [**`quelda`**](https://www.npmjs.com/package/quelda): it scans a `File` in a Web Worker, without
@@ -153,7 +179,7 @@ tell users right away that a file will be refused. Install, framework and CDN ex
 
 A browser check is a convenience, not a security boundary: always scan again on the server.
 
-## Supported files
+## 📄 Supported files
 
 quelda identifies a file by its content, not by its extension.
 
@@ -165,7 +191,7 @@ quelda identifies a file by its content, not by its extension.
   attackers reach Ghostscript. If you must accept EPS, handle it outside quelda: use its
   embedded preview image, or convert it to PDF in a locked-down sandbox and scan the result.
 
-## Development
+## 🔧 Development
 
 Want to add a rule or fix something? Read [CONTRIBUTING.md](CONTRIBUTING.md) first.
 
@@ -224,10 +250,10 @@ formula.
 | `CONTRIBUTING.md` | How to contribute, checklist for adding a rule |
 | `packaging/homebrew/` | Homebrew formula template |
 
-## Security
+## 🔒 Security
 
 Please report vulnerabilities privately, as described in [SECURITY.md](SECURITY.md).
 
-## License
+## 📜 License
 
 [MIT](LICENSE).

@@ -1,5 +1,4 @@
-//! `STRUCT.NAME_TOO_LONG`: a name longer than the 127 bytes readers are
-//! built for (ISO 32000-1 Annex C.2), anywhere: dictionary keys and values,
+//! `STRUCT.NAME_TOO_LONG`: a name longer than 255 bytes, anywhere: dictionary keys and values,
 //! arrays, top-level objects, operands and inline images of content streams
 //! (not of speculative ones: binary data reads as long names).
 
@@ -17,15 +16,19 @@ static META: RuleMeta = RuleMeta {
     locked: false,
     stage: Stage::Stable,
     since: "0.2.0",
-    message: "Name longer than 127 bytes",
-    description: "A name (after #xx decoding) longer than 127 bytes, the implementation \
-        limit of ISO 32000-1 Annex C.2 that readers size their buffers for. Long font \
-        and resource names have overflowed fixed buffers in renderers (Ghostscript, \
-        2025); producers never write them.",
+    message: "Name longer than 255 bytes",
+    description: "A name (after #xx decoding) longer than 255 bytes. Long font and \
+        resource names have overflowed fixed buffers in renderers (Ghostscript, 2025). \
+        ISO 32000-1 Annex C.2 gives 127 bytes as the limit readers must handle, but real \
+        producers exceed it: Word writes paragraph style names of up to about 250 bytes \
+        as structure types, and form tools write long checkbox state names. No producer \
+        is known to write names over 255 bytes.",
 };
 
-/// ISO 32000-1 Annex C.2, Table C.1.
-const MAX_NAME: usize = 127;
+/// Twice the 127 bytes of ISO 32000-1 Annex C.2, Table C.1: real tagged
+/// PDFs (Word style names as structure types) have names of 128 to 253
+/// bytes, measured on 1,828 benign files (2026-11-12).
+const MAX_NAME: usize = 255;
 
 /// A long name for the finding: its length and its start, printable.
 fn detail(n: &Name) -> String {
@@ -116,10 +119,10 @@ mod tests {
     }
 
     #[test]
-    fn limit_is_127_decoded_bytes() {
+    fn limit_is_255_decoded_bytes() {
         let ok = name(MAX_NAME);
         let long = name(MAX_NAME + 1);
-        // 128 bytes once `#41` is decoded; 127 encoded `#41` decode to 127.
+        // 256 bytes once `#41` is decoded; 255 encoded `#41` decode to 255.
         let encoded = format!("#41{}", name(MAX_NAME));
         let src = format!(
             "1 0 obj << /BaseFont /{ok} >> endobj\n\
@@ -136,17 +139,17 @@ mod tests {
         assert_eq!(
             hits(src.as_bytes()),
             vec![
-                format!("2 0: {}", d(128)),
-                format!("3 0: {}", d(128)),
-                format!("4 0: {}", d(128)),
-                format!("5 0: {}", d(128)),
+                format!("2 0: {}", d(256)),
+                format!("3 0: {}", d(256)),
+                format!("4 0: {}", d(256)),
+                format!("5 0: {}", d(256)),
             ]
         );
     }
 
     #[test]
     fn content_operands_and_inline_images() {
-        let long = name(200);
+        let long = name(300);
         let data = format!(
             "BT /{long} 12 Tf ET q [/{long}] TJ BI /W 1 /H 1 /CS /{long} /BPC 8 ID x EI Q /Ok gs\n"
         );
@@ -156,12 +159,12 @@ mod tests {
         );
         let found = hits(src.as_bytes());
         assert_eq!(found.len(), 3, "{found:?}");
-        assert!(found.iter().all(|f| f.starts_with("op 2 0: name of 200 bytes")));
+        assert!(found.iter().all(|f| f.starts_with("op 2 0: name of 300 bytes")));
     }
 
     #[test]
     fn speculative_streams_are_skipped() {
-        let data = format!("BT /{} 12 Tf ET\n", name(200));
+        let data = format!("BT /{} 12 Tf ET\n", name(300));
         let src = format!(
             "1 0 obj << /Length {} >> stream\n{data}\nendstream endobj\n",
             data.len()

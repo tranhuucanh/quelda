@@ -20,20 +20,24 @@ const BATCH_B: &[(&str, Severity, Action)] = &[
     ("EMBED.RICH_MEDIA", Severity::High, Action::Block),
     ("EMBED.PORTFOLIO", Severity::High, Action::Block),
     ("EXTERNAL.URI", Severity::Low, Action::Warn),
-    ("EXTERNAL.REMOTE_GOTO", Severity::Medium, Action::Warn),
-    ("EXTERNAL.SUBMIT_FORM", Severity::Medium, Action::Warn),
-    ("EXTERNAL.IMPORT_DATA", Severity::Medium, Action::Warn),
-    ("EXTERNAL.URL_FILESPEC", Severity::Medium, Action::Warn),
-    ("FORMS.XFA", Severity::High, Action::Warn),
+    ("EXTERNAL.REMOTE_GOTO", Severity::Medium, Action::Block),
+    ("EXTERNAL.SUBMIT_FORM", Severity::Medium, Action::Block),
+    ("EXTERNAL.IMPORT_DATA", Severity::Medium, Action::Block),
+    ("EXTERNAL.URL_FILESPEC", Severity::Medium, Action::Block),
+    ("FORMS.XFA", Severity::High, Action::Block),
     ("FORMS.ACROFORM", Severity::Low, Action::Warn),
     ("XML.DOCTYPE", Severity::High, Action::Block),
     ("STRUCT.TRAILING_DATA", Severity::Medium, Action::Warn),
-    ("STRUCT.MISSING_EOF", Severity::Low, Action::Warn),
+    ("STRUCT.MISSING_EOF", Severity::Low, Action::Block),
     ("STRUCT.XREF_MISMATCH", Severity::Medium, Action::Warn),
-    ("STRUCT.CONFLICTING_OBJECTS", Severity::Medium, Action::Warn),
+    (
+        "STRUCT.CONFLICTING_OBJECTS",
+        Severity::Medium,
+        Action::Block,
+    ),
     ("STRUCT.INCREMENTAL_UPDATE", Severity::Info, Action::Off),
-    ("STRUCT.MULTIPLE_HEADERS", Severity::Medium, Action::Warn),
-    ("STRUCT.PAGE_TREE_CYCLE", Severity::High, Action::Warn),
+    ("STRUCT.MULTIPLE_HEADERS", Severity::Medium, Action::Block),
+    ("STRUCT.PAGE_TREE_CYCLE", Severity::High, Action::Block),
     ("STRUCT.FILTER_CHAIN", Severity::Medium, Action::Warn),
     ("RESOURCE.IMAGE_DIMENSIONS", Severity::High, Action::Block),
     ("RESOURCE.PAGE_SIZE", Severity::Medium, Action::Block),
@@ -78,7 +82,7 @@ fn batch_b_registered_as_designed() {
     }
     // With batch A (13 rules): the whole v0.1 rule set.
     assert_eq!(BATCH_B.len(), 26);
-    assert_eq!(registry::list().len(), 53);
+    assert_eq!(registry::list().len(), 56);
 }
 
 /// Variant names of the in-memory `bad/` fixtures of `rule`.

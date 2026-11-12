@@ -5,7 +5,7 @@
 id = "FORMS.XFA"
 category = "forms"
 severity = "high"
-default_action = "warn"
+default_action = "block"
 locked = false
 stage = "stable"
 since = "0.1.0"
