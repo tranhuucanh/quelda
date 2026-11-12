@@ -8,6 +8,21 @@ engine share one version.
 Rule IDs never change meaning or disappear. A new rule, or a rule that starts to
 match more files, is listed under **Rules** because it can change verdicts.
 
+## [0.4.2] — 2026-11-12
+
+Every verdict is the same as in 0.4.1.
+
+### Fixed
+
+- `RESOURCE.DRAW_RECURSION` took minutes on a file whose forms all call each other
+  (a few MB, crafted or found by fuzzing): its time grew with the cube of the number of
+  forms. A 6 MB file with 1,600 such forms now takes under 1 second instead of 36.
+
+### Added
+
+- Fuzz targets (cargo-fuzz) for the lexer, the file structure, the stream filters and the
+  whole scan, in `fuzz/`.
+
 ## [0.4.1] — 2026-11-12
 
 Documentation only: the engine, the rules and every verdict are the same as in 0.4.0.
