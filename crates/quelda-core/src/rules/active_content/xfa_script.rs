@@ -24,13 +24,16 @@ static META: RuleMeta = RuleMeta {
         UTF-8, UTF-16 or UTF-32) has a <script> element with code in it: JavaScript or \
         FormCalc that Acrobat and Reader run when the form opens, calculates or validates, \
         with the same reach as document JavaScript. Empty <script/> elements, which form \
-        designers leave in templates, are not reported.",
+        designers leave in templates, <script> settings in the config packet \
+        (<runScripts>, <currentPage>, <exclude>) and elements named script in the form \
+        data (<datasets>) are not reported.",
 };
 
 /// The language of the first `<script>` with code in `view`.
 fn script(view: &[u8]) -> Option<&'static str> {
+    let data = data_ranges(view);
     start_tags(view, "script").find_map(|Tag { start, end, empty }| {
-        if empty {
+        if empty || data.iter().any(|&(from, to)| (from..to).contains(&start)) {
             return None;
         }
         let body = &view[end..];
@@ -48,7 +51,64 @@ fn script(view: &[u8]) -> Option<&'static str> {
     })
 }
 
-/// Anything but whitespace, CDATA markers and comments.
+/// The insides of `<datasets>` elements in `view`: form data, which no
+/// XFA processor runs. Only closed ones: an unclosed `<datasets>` hides
+/// nothing.
+fn data_ranges(view: &[u8]) -> Vec<(usize, usize)> {
+    start_tags(view, "datasets")
+        .filter(|t| !t.empty)
+        .filter_map(|t| close_tag(&view[t.end..], b"datasets").map(|c| (t.end, t.end + c)))
+        .collect()
+}
+
+/// Offset of the first `</local>` or `</prefix:local >` in `view`.
+fn close_tag(view: &[u8], local: &[u8]) -> Option<usize> {
+    memchr::memmem::find_iter(view, b"</").find(|&at| {
+        let rest = &view[at + 2..];
+        let name_end = rest
+            .iter()
+            .position(|&b| b.is_ascii_whitespace() || b == b'>')
+            .unwrap_or(rest.len());
+        let name = &rest[..name_end];
+        name.rsplit(|&b| b == b':')
+            .next()
+            .is_some_and(|n| n.eq_ignore_ascii_case(local))
+            && rest[name_end..].trim_ascii_start().first() == Some(&b'>')
+    })
+}
+
+/// Children of the config packet's `<script>` settings element.
+const SETTINGS: [&[u8]; 3] = [b"runScripts", b"currentPage", b"exclude"];
+
+/// A settings child at the start of `rest` (`<runScripts>both</runScripts>`
+/// or `<exclude/>`, any prefix): what follows it.
+fn setting(rest: &[u8]) -> Option<&[u8]> {
+    let name_end = rest
+        .iter()
+        .skip(1)
+        .position(|&b| b.is_ascii_whitespace() || b == b'>' || b == b'/')?
+        + 1;
+    let name = &rest[1..name_end];
+    let local = name.rsplit(|&b| b == b':').next()?;
+    if !SETTINGS.iter().any(|s| s.eq_ignore_ascii_case(local)) {
+        return None;
+    }
+    let gt = name_end + memchr::memchr(b'>', &rest[name_end..])?;
+    let after = &rest[gt + 1..];
+    if rest[gt - 1] == b'/' {
+        return Some(after);
+    }
+    // Text only (no markup) up to its own end tag.
+    let close = memchr::memchr(b'<', after)?;
+    let end = close_tag(&after[close..], local)?;
+    if end != 0 {
+        return None;
+    }
+    let gt = memchr::memchr(b'>', &after[close..])?;
+    Some(&after[close + gt + 1..])
+}
+
+/// Anything but whitespace, CDATA markers, comments and config settings.
 fn has_code(body: &[u8]) -> bool {
     let mut rest = body;
     loop {
@@ -62,6 +122,8 @@ fn has_code(body: &[u8]) -> bool {
             rest = r;
         } else if let Some(r) = rest.strip_prefix(b"<!--") {
             rest = find_ci(r, b"-->").map_or(&[][..], |e| &r[e + 3..]);
+        } else if let Some(r) = rest.starts_with(b"<").then(|| setting(rest)).flatten() {
+            rest = r;
         } else {
             return true;
         }
@@ -119,6 +181,13 @@ mod tests {
         assert_eq!(script(b"<t:script><![CDATA[x()]]></t:script>"), Some("FormCalc"));
         // Unclosed: code up to the end.
         assert_eq!(script(b"<script>x()"), Some("FormCalc"));
+        // Settings, then code.
+        assert_eq!(script(b"<script><runScripts>both</runScripts>x()</script>"), Some("FormCalc"));
+        assert_eq!(script(b"<script><runScripts><b/>x()</runScripts></script>"), Some("FormCalc"));
+        assert_eq!(script(b"<script><other>x()</other></script>"), Some("FormCalc"));
+        // Outside the form data, or in data that is never closed.
+        assert_eq!(script(b"<xfa:datasets><a/></xfa:datasets ><script>x()</script>"), Some("FormCalc"));
+        assert_eq!(script(b"<xfa:datasets><script>x()</script>"), Some("FormCalc"));
         for empty in [
             &b"<script/>"[..],
             b"<script contentType='application/x-javascript'/>",
@@ -127,6 +196,9 @@ mod tests {
             b"<script><!-- nothing --></script>",
             b"<scripts>x</scripts>",
             b"<draw>&lt;script&gt;x&lt;/script&gt;</draw>",
+            b"<acrobat><script><runScripts>server</runScripts></script></acrobat>",
+            b"<script>\n  <currentPage>0</currentPage>\n  <exclude/>\n  <!-- x -->\n  <runScripts>both</runScripts>\n</script>",
+            b"<xfa:datasets><xfa:data><form1><script>Act 1</script></form1></xfa:data></xfa:datasets>",
         ] {
             assert_eq!(script(empty), None, "{}", String::from_utf8_lossy(empty));
         }

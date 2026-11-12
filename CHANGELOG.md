@@ -18,11 +18,14 @@ Eight new rules (53 in all). On the real files we test with (147 files, 739 embe
 - `ACTIVE.XFA_SCRIPT` (new; block, block, warn): a script (JavaScript or FormCalc) in an
   XFA form's XML, which Acrobat runs like document JavaScript; `ACTIVE.JAVASCRIPT` only
   saw JavaScript in PDF dictionaries, and `FORMS.XFA` only warns in balanced, so such forms
-  passed by default. Empty `<script/>` elements are not reported.
+  passed by default. Empty `<script/>` elements, the `<script>` settings of the config
+  packet (`<runScripts>`, `<currentPage>`, `<exclude>`) and form data fields named
+  `script` are not reported.
 - `ACTIVE.DANGEROUS_URI` (new; block, block, warn): a link to `javascript:`, `vbscript:`,
   `data:`, `file:`, `smb:`, a network share (`\\server\share`), a Windows path or an
   `ms-*:` / `search-ms:` protocol handler: runs code in web viewers or leaks Windows
-  credentials. Read the way browsers read URLs (case, tabs, leading control characters,
+  credentials. A document base URI of these kinds (`/URI << /Base … >>` in the catalog),
+  which turns relative links into such links, is reported too. Read the way browsers read URLs (case, tabs, leading control characters,
   UTF-16). Ordinary links keep `EXTERNAL.URI` (warn in balanced).
 - `XML.EXTERNAL_REFERENCE` (new; block, block, warn): XInclude, `<?xml-stylesheet?>` or an
   XFA web service connection in XMP or XFA: the XML parser fetches a file or a URL.

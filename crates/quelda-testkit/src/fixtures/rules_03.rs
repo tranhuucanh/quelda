@@ -1116,6 +1116,525 @@ fn function_size() -> Vec<Fixture> {
     ]
 }
 
+// Files shaped like the real ones `corpus/` lacks: complete LiveCycle
+// forms, intranet documents, Office and app links, metadata written by
+// Acrobat, artwork with nested and shared forms, colour lookup tables.
+
+/// LiveCycle Designer `config` packet: its `<script>` elements are settings.
+const LC_CONFIG: &str = "<config xmlns=\"http://www.xfa.org/schema/xci/3.0/\">\
+<agent name=\"designer\"><destination>pdf</destination><pdf><fontInfo/></pdf></agent>\
+<present><pdf><version>1.7</version><adobeExtensionLevel>8</adobeExtensionLevel></pdf>\
+<common><data><xsl><uri/></xsl><outputXSL><uri/></outputXSL></data></common>\
+<script><runScripts>server</runScripts></script><xdp><packets>*</packets></xdp></present>\
+<acrobat><acrobat7><dynamicRender>required</dynamicRender></acrobat7><validate>preSubmit</validate>\
+<common><locale>vi_VN</locale></common>\n<script>\n  <currentPage>0</currentPage>\n  <exclude/>\n</script></acrobat></config>";
+
+/// LiveCycle Designer template: designer processing instructions, a
+/// `scriptTest` validation, an empty click script, a submit button.
+fn lc_template(calculate: &str) -> String {
+    format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+<template xmlns=\"http://www.xfa.org/schema/xfa-template/3.3/\"><?formServer defaultPDFRenderFormat acrobat10.0dynamic?>\n\
+<subform name=\"form1\" layout=\"tb\" locale=\"vi_VN\" restoreState=\"auto\"><pageSet><pageArea name=\"Page1\" id=\"Page1\">\
+<contentArea x=\"0.25in\" y=\"0.25in\" w=\"8in\" h=\"10.5in\"/><medium stock=\"a4\" short=\"210mm\" long=\"297mm\"/>\
+<?templateDesigner expand 1?></pageArea></pageSet>\n\
+<subform w=\"8in\" h=\"10.5in\"><field name=\"HoTen\" w=\"62mm\" h=\"9mm\"><ui><textEdit><border><edge stroke=\"lowered\"/></border><margin/></textEdit></ui>\
+<font typeface=\"Arial\"/><caption reserve=\"25mm\"><value><text>Họ tên</text></value></caption><bind match=\"dataRef\" ref=\"$.HoTen\"/>\
+<validate nullTest=\"error\" scriptTest=\"warning\"><message><text name=\"scriptTest\">Sai định dạng</text></message></validate></field>\n\
+<field name=\"NgaySinh\"><ui><dateTimeEdit><comb numberOfCells=\"8\"/></dateTimeEdit></ui><value><date/></value>\
+<format><picture>date{{DD/MM/YYYY}}</picture></format></field>\n\
+<field name=\"Tong\"><ui><numericEdit/></ui>{calculate}<event activity=\"click\" name=\"event__click\"><script contentType=\"application/x-javascript\"/></event></field>\n\
+<field name=\"Gui\"><ui><button/></ui><caption><value><text>Gửi</text></value></caption>\
+<event activity=\"click\"><submit format=\"pdf\" textEncoding=\"UTF-8\" target=\"https://example.invalid/forms/submit\"/></event></field>\n\
+</subform><proto/><desc><text name=\"version\">11.0.1.20140218.1.907162.903801</text></desc>\
+<?templateDesigner Hyphenation excludeInitialCap:1, excludeAllCaps:1, wordCharCnt:7?><?templateDesigner Zoom 108?></subform></template>"
+    )
+}
+
+const LC_LOCALE: &str = "<localeSet xmlns=\"http://www.xfa.org/schema/xfa-locale-set/2.7/\"><locale name=\"vi_VN\" desc=\"Vietnamese (Vietnam)\">\
+<calendarSymbols name=\"gregorian\"><monthNames><month>tháng một</month></monthNames></calendarSymbols>\
+<datePatterns><datePattern name=\"full\">EEEE, D MMMM YYYY</datePattern></datePatterns>\
+<numberSymbols><numberSymbol name=\"decimal\">,</numberSymbol></numberSymbols></locale></localeSet>";
+
+const LC_DATASETS: &str = "<xfa:datasets xmlns:xfa=\"http://www.xfa.org/schema/xfa-data/1.0/\"><xfa:data><form1><HoTen>Nguyễn Văn A</HoTen><NgaySinh/><Tong/></form1></xfa:data>\
+<dd:dataDescription xmlns:dd=\"http://ns.adobe.com/data-description/\" dd:name=\"form1\"><form1><HoTen/><NgaySinh/><Tong/></form1></dd:dataDescription></xfa:datasets>";
+
+/// XMP as Acrobat and InDesign write it: many namespaces, history, a
+/// derived-from reference, padding.
+fn acrobat_xmp() -> String {
+    format!(
+        "<?xpacket begin=\"\u{feff}\" id=\"W5M0MpCehiHzreSzNTczkc9d\"?>\n\
+<x:xmpmeta xmlns:x=\"adobe:ns:meta/\" x:xmptk=\"Adobe XMP Core 9.1-c001\">\n\
+<rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">\n\
+<rdf:Description rdf:about=\"\" xmlns:dc=\"http://purl.org/dc/elements/1.1/\" xmlns:xmp=\"http://ns.adobe.com/xap/1.0/\" \
+xmlns:xmpMM=\"http://ns.adobe.com/xap/1.0/mm/\" xmlns:stRef=\"http://ns.adobe.com/xap/1.0/sType/ResourceRef#\" \
+xmlns:stEvt=\"http://ns.adobe.com/xap/1.0/sType/ResourceEvent#\" xmlns:pdf=\"http://ns.adobe.com/pdf/1.3/\" \
+xmlns:pdfx=\"http://ns.adobe.com/pdfx/1.3/\" xmlns:desc=\"http://ns.adobe.com/xfa/promoted-desc/\">\n\
+<dc:format>application/pdf</dc:format><dc:title><rdf:Alt><rdf:li xml:lang=\"x-default\">Báo cáo quý 3 — bao gồm phụ lục (include appendix)</rdf:li></rdf:Alt></dc:title>\n\
+<dc:description><rdf:Alt><rdf:li xml:lang=\"x-default\">Xuất từ template.xsl; xml-stylesheet không dùng</rdf:li></rdf:Alt></dc:description>\n\
+<xmp:CreatorTool>Adobe InDesign 19.0 (Windows)</xmp:CreatorTool><xmp:CreateDate>2024-03-01T08:00:00+07:00</xmp:CreateDate>\n\
+<xmpMM:DocumentID>xmp.did:quelda-test</xmpMM:DocumentID><xmpMM:DerivedFrom rdf:parseType=\"Resource\">\
+<stRef:instanceID>xmp.iid:quelda-test</stRef:instanceID><stRef:documentID>xmp.did:quelda-test</stRef:documentID></xmpMM:DerivedFrom>\n\
+<xmpMM:History><rdf:Seq><rdf:li rdf:parseType=\"Resource\"><stEvt:action>converted</stEvt:action>\
+<stEvt:parameters>from application/x-indesign to application/pdf</stEvt:parameters><stEvt:softwareAgent>Adobe InDesign 19.0</stEvt:softwareAgent></rdf:li></rdf:Seq></xmpMM:History>\n\
+<pdf:Producer>Adobe PDF Library 17.0</pdf:Producer><pdfx:SourceModified>D:20240301</pdfx:SourceModified>\n\
+</rdf:Description></rdf:RDF></x:xmpmeta>\n{}\n<?xpacket end=\"w\"?>",
+        " ".repeat(2048)
+    )
+}
+
+/// A complete LiveCycle form as Designer saves it: every packet, the
+/// template Flate-compressed, `/XFA` an array of names, streams and the
+/// preamble and postamble strings.
+fn livecycle(template: &str, datasets: &str) -> Vec<u8> {
+    let mut doc = Doc::new();
+    doc.catalog_extra = "/AcroForm 10 0 R /NeedsRendering true /Metadata 15 0 R".to_string();
+    let mut b = doc.builder();
+    b.object(
+        10,
+        "<< /Fields [] /DA (/Helv 0 Tf 0 g) /XFA [(preamble) (<xdp:xdp xmlns:xdp=\"http://ns.adobe.com/xdp/\" timeStamp=\"2024-03-01T08:00:00Z\">) \
+(config) 11 0 R (template) 12 0 R (localeSet) 13 0 R (datasets) 14 0 R (xmpmeta) 15 0 R (xfdf) 16 0 R (form) 17 0 R \
+(postamble) (</xdp:xdp>)] >>",
+    )
+    .stream(11, "", LC_CONFIG.as_bytes(), &[Filter::Flate])
+    .stream(12, "", template.as_bytes(), &[Filter::Flate])
+    .stream(13, "", LC_LOCALE.as_bytes(), &[Filter::Flate])
+    .stream(14, "", datasets.as_bytes(), &[Filter::Flate])
+    .stream(15, "/Type /Metadata /Subtype /XML", acrobat_xmp().as_bytes(), &[])
+    .stream(16, "", b"<xfdf xmlns=\"http://ns.adobe.com/xfdf/\" xml:space=\"preserve\"><annots/></xfdf>", &[])
+    .stream(17, "", b"<form checksum=\"quelda-test\" xmlns=\"http://www.xfa.org/schema/xfa-form/2.8/\"><subform name=\"form1\"><instanceManager name=\"_Page1\"/></subform></form>", &[]);
+    b.build()
+}
+
+fn lc_form() -> Vec<u8> {
+    livecycle(
+        &lc_template("<calculate override=\"warning\"/>"),
+        LC_DATASETS,
+    )
+}
+
+fn xfa_script_lookalikes() -> Vec<Fixture> {
+    let forms = &[XFA, ACROFORM];
+    vec![
+        good(
+            XFA_SCRIPT,
+            "livecycle-form",
+            lc_form(),
+            forms,
+            "Complete LiveCycle Designer form without code: config `<script>` settings, `scriptTest`, an empty click script, a submit button",
+        ),
+        good(
+            XFA_SCRIPT,
+            "config-settings",
+            xfa_builder(LC_CONFIG.as_bytes(), DATASETS, &[]).build(),
+            forms,
+            "Config packet whose `<script>` elements hold `<runScripts>`, `<currentPage>` and `<exclude/>`",
+        ),
+        good(
+            XFA_SCRIPT,
+            "data-field-named-script",
+            xfa_builder(
+                template("<ui><textEdit multiLine=\"1\"/></ui><bind match=\"dataRef\" ref=\"$.script\"/>").as_bytes(),
+                "<xfa:datasets xmlns:xfa=\"http://www.xfa.org/schema/xfa-data/1.0/\"><xfa:data><form1><script>Cảnh 1: Ngoài trời, ban ngày.</script></form1></xfa:data></xfa:datasets>".as_bytes(),
+                &[],
+            )
+            .build(),
+            forms,
+            "Form data with a field named `script` (a screenplay submission form)",
+        ),
+        bad(
+            XFA_SCRIPT,
+            "livecycle-calculation",
+            livecycle(
+                &lc_template("<calculate override=\"warning\"><script contentType=\"application/x-javascript\">this.rawValue = 1;</script></calculate>"),
+                LC_DATASETS,
+            ),
+            forms,
+            "Complete LiveCycle form with a calculation script (blocked by design: Acrobat runs it)",
+        ),
+        bad(
+            XFA_SCRIPT,
+            "script-object",
+            xfa(&template("<variables><script name=\"util\" contentType=\"application/x-javascript\">function f() { return 1; }</script></variables>")),
+            forms,
+            "Script object in `<variables>`",
+        ),
+        bad(
+            XFA_SCRIPT,
+            "settings-then-code",
+            xfa(&template("<event activity=\"initialize\"><script><runScripts>both</runScripts>app.alert(\"quelda-test\")</script></event>")),
+            forms,
+            "A `<script>` that starts like the config settings, followed by code",
+        ),
+        bad(
+            XFA_SCRIPT,
+            "after-datasets",
+            {
+                let mut doc = Doc::new();
+                doc.catalog_extra = "/AcroForm << /Fields [] /XFA 11 0 R >>".to_string();
+                let mut b = doc.builder();
+                let xdp = format!(
+                    "<xdp:xdp xmlns:xdp=\"http://ns.adobe.com/xdp/\">{}{}</xdp:xdp>",
+                    String::from_utf8_lossy(DATASETS),
+                    template(ALERT)
+                );
+                b.stream(11, "", xdp.as_bytes(), &[]);
+                b.build()
+            },
+            forms,
+            "One XDP stream: form data, then a template with a script",
+        ),
+    ]
+}
+
+/// Base doc + one link annotation per URI (objects 10, 11, …), plus `more`.
+fn links(uris: &[&[u8]], more: impl FnOnce(&mut Doc)) -> Vec<u8> {
+    let mut doc = Doc::new();
+    doc.annots = (10..).take(uris.len()).collect();
+    more(&mut doc);
+    let mut b = doc.builder();
+    for (n, uri) in (10..).zip(uris) {
+        let y = 760 - 20 * (n - 10);
+        b.object(
+            n,
+            format!("<< /Type /Annot /Subtype /Link /Rect [72 {y} 300 {}] /Border [0 0 0] /A << /S /URI /URI {} >> >>", y + 14, hex(uri)),
+        );
+    }
+    b.build()
+}
+
+fn base(uri: &str) -> impl FnOnce(&mut Doc) + '_ {
+    move |doc: &mut Doc| doc.catalog_extra = format!("/URI << /Base {} >>", hex(uri.as_bytes()))
+}
+
+fn dangerous_uri_lookalikes() -> Vec<Fixture> {
+    let uri = &[URI];
+    vec![
+        good(
+            DANGEROUS_URI,
+            "web-links",
+            links(
+                &[
+                    b"  HTTPS://EXAMPLE.INVALID/Docs/A.pdf",
+                    b"https://example.invalid/maps/@10.77,106.70,15z/data=!3m1:x",
+                    b"https://example.invalid/wiki/File:Logo.png",
+                    b"example.invalid:8080/docs",
+                    b"//example.invalid/cdn/a.js",
+                    b"mailto:quelda-test@example.invalid?subject=javascript:%20h%E1%BB%8Fi&body=file:",
+                    b"#page=3",
+                ],
+                |_| {},
+            ),
+            uri,
+            "Web links written the many ways real documents do: upper case, leading spaces, colons in the path, a port, no scheme",
+        ),
+        good(
+            DANGEROUS_URI,
+            "app-links",
+            links(
+                &[
+                    b"msteams:/l/chat/0/0?users=quelda-test@example.invalid",
+                    b"zoommtg://example.invalid/join?confno=0",
+                    b"tel:+84000000000",
+                    b"sms:+84000000000",
+                    b"geo:10.77,106.70",
+                    b"urn:isbn:0000000000",
+                    b"doi:10.0000/quelda-test",
+                    b"itms-apps://example.invalid/app/id0",
+                    b"skype:quelda-test?call",
+                    b"whatsapp://send?text=quelda-test",
+                ],
+                |_| {},
+            ),
+            uri,
+            "Links to apps (Teams, Zoom, phone, maps, stores, chat)",
+        ),
+        good(
+            DANGEROUS_URI,
+            "utf16-https",
+            links(&[&utf16be("https://example.invalid/tài-liệu.pdf")], |_| {}),
+            uri,
+            "Web link written in UTF-16 with non-ASCII letters",
+        ),
+        good(
+            DANGEROUS_URI,
+            "base-https",
+            links(&[b"chapter2.html"], base("https://example.invalid/docs/")),
+            uri,
+            "Relative link resolved against a web base URI",
+        ),
+        bad(
+            DANGEROUS_URI,
+            "base-file",
+            links(&[b"quelda-test.pdf"], base("file:quelda-test/")),
+            uri,
+            "Relative link resolved against a `file:` base URI",
+        ),
+        bad(
+            DANGEROUS_URI,
+            "base-unc",
+            links(&[b"quelda-test.pdf"], base("\\\\example.invalid\\quelda-test\\")),
+            uri,
+            "Relative link resolved against a network share base URI",
+        ),
+        bad(
+            DANGEROUS_URI,
+            "intranet-share",
+            links(
+                &[
+                    b"https://example.invalid/intranet/policy.pdf",
+                    b"mailto:it@example.invalid",
+                    b"\\\\example.invalid\\phong-ke-toan\\bao-cao.xlsx",
+                ],
+                |_| {},
+            ),
+            uri,
+            "Intranet document: ordinary links and one to a file share (blocked by design: opening it sends the Windows password hash)",
+        ),
+        bad(
+            DANGEROUS_URI,
+            "ms-office",
+            links(&[b"ms-word:ofe|u|https://example.invalid/quelda-test.docx"], |_| {}),
+            uri,
+            "Office protocol link (`ms-word:`), blocked by design with every `ms-*` handler",
+        ),
+    ]
+}
+
+fn xml_external_reference_lookalikes() -> Vec<Fixture> {
+    vec![
+        good(
+            XML_REF,
+            "acrobat-xmp",
+            xmp(acrobat_xmp().as_bytes(), &[]),
+            &[],
+            "XMP as InDesign writes it, mentioning `include` and `xml-stylesheet` in its text",
+        ),
+        good(
+            XML_REF,
+            "xinclude-namespace-only",
+            xmp(
+                xmp_with("<dc:format xmlns:xi=\"http://www.w3.org/2001/XInclude\">application/pdf</dc:format>").as_bytes(),
+                &[Filter::Flate],
+            ),
+            &[],
+            "XInclude namespace declared but no `<include>`",
+        ),
+        good(
+            XML_REF,
+            "livecycle-form",
+            lc_form(),
+            &[XFA, ACROFORM],
+            "Complete LiveCycle form with a submit button and XSL settings",
+        ),
+    ]
+}
+
+fn draw_recursion_lookalikes() -> Vec<Fixture> {
+    let form = |res: &str| format!("{FORM} /Resources << /XObject << {res} >> >>");
+    vec![
+        good(
+            DRAW_LOOP,
+            "diamond",
+            drawing(|b| {
+                b.stream(
+                    10,
+                    &form("/B 11 0 R /C 12 0 R"),
+                    b"q /B Do Q q /C Do Q",
+                    &[],
+                )
+                .stream(11, &form("/D 13 0 R"), b"/D Do", &[])
+                .stream(12, &form("/D 13 0 R"), b"/D Do", &[])
+                .stream(13, FORM, b"0 0 10 10 re f", &[]);
+            }),
+            &[],
+            "Two forms that both draw the same logo form (a diamond, not a loop)",
+        ),
+        good(
+            DRAW_LOOP,
+            "deep-chain",
+            drawing(|b| {
+                for n in 10..50u32 {
+                    if n == 49 {
+                        b.stream(n, FORM, b"0 0 1 1 re f", &[]);
+                    } else {
+                        b.stream(
+                            n,
+                            &form(&format!("/X {} 0 R", n + 1)),
+                            b"q 0.9 0 0 0.9 1 1 cm /X Do Q",
+                            &[],
+                        );
+                    }
+                }
+            }),
+            &[],
+            "Forty forms nested one in another (deep artwork groups)",
+        ),
+        good(
+            DRAW_LOOP,
+            "same-name-nested",
+            drawing(|b| {
+                b.stream(10, &form("/Fm0 11 0 R"), b"/Fm0 Do", &[]).stream(
+                    11,
+                    FORM,
+                    b"0 0 10 10 re f",
+                    &[],
+                );
+            }),
+            &[],
+            "Form `/Fm0` drawing its own, different `/Fm0` (names are per resource dictionary)",
+        ),
+        good(
+            DRAW_LOOP,
+            "soft-mask-group",
+            drawing(|b| {
+                b.stream(
+                    10,
+                    &format!("{FORM} /Resources << /ExtGState << /GS0 << /SMask << /S /Luminosity /G 11 0 R >> >> >> >>"),
+                    b"/GS0 gs 0 0 100 100 re f",
+                    &[],
+                )
+                .stream(11, &format!("{FORM} /Group << /S /Transparency /CS /DeviceGray >>"), b"0.5 g 0 0 100 100 re f", &[]);
+            }),
+            &[],
+            "Soft mask drawn by a separate transparency group, as Illustrator exports it",
+        ),
+        good(
+            DRAW_LOOP,
+            "pattern-uses-pattern",
+            drawing(|b| {
+                b.stream(10, &format!("{FORM} /Resources 14 0 R"), b"/Pattern cs /P0 scn 0 0 100 100 re f", &[])
+                    .object(14, "<< /Pattern << /P0 11 0 R /P1 12 0 R >> >>")
+                    .stream(11, "/Type /Pattern /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 10 10] /XStep 10 /YStep 10 /Resources 14 0 R", b"/Pattern cs /P1 scn 0 0 10 10 re f", &[])
+                    .stream(12, "/Type /Pattern /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 2 2] /XStep 2 /YStep 2 /Resources 14 0 R", b"0 0 1 1 re f", &[]);
+            }),
+            &[],
+            "Pattern painted with another pattern; both share a resource dictionary listing both",
+        ),
+        good(
+            DRAW_LOOP,
+            "type3-bitmap-glyphs",
+            drawing(|b| {
+                b.stream(10, &format!("{FORM} /Resources << /Font << /T3 11 0 R >> >>"), b"BT /T3 12 Tf (AB) Tj ET", &[])
+                    .object(11, "<< /Type /Font /Subtype /Type3 /FontMatrix [0.01 0 0 0.01 0 0] /FontBBox [0 0 100 100] \
+                        /Encoding << /Type /Encoding /Differences [65 /a /b] >> /CharProcs << /a 12 0 R /b 12 0 R >> \
+                        /FirstChar 65 /LastChar 66 /Widths [100 100] /Resources << /XObject << /Im0 13 0 R >> /Font << /T3 11 0 R >> >> >>")
+                    .stream(12, "", b"100 0 0 0 100 100 d1 q 100 0 0 100 0 0 cm /Im0 Do Q", &[])
+                    .stream(13, "/Type /XObject /Subtype /Image /Width 1 /Height 1 /ColorSpace /DeviceGray /BitsPerComponent 8", b"\x80", &[]);
+            }),
+            &[],
+            "Type 3 bitmap font (as TeX makes them): glyphs draw an image, the font lists itself",
+        ),
+        good(
+            DRAW_LOOP,
+            "stamp-appearance",
+            {
+                let mut doc = Doc::new();
+                doc.annots = vec![20];
+                let mut b = doc.builder();
+                b.object(
+                    20,
+                    "<< /Type /Annot /Subtype /Stamp /Rect [72 600 272 700] /AP << /N 21 0 R >> >>",
+                )
+                .stream(21, &form("/FRM 22 0 R"), b"q 1 0 0 1 0 0 cm /FRM Do Q", &[])
+                .stream(22, FORM, b"1 0 0 rg 0 0 100 100 re f", &[]);
+                b.build()
+            },
+            &[],
+            "Stamp annotation whose appearance draws an inner form, as Acrobat writes it",
+        ),
+        bad(
+            DRAW_LOOP,
+            "long-cycle",
+            drawing(|b| {
+                for n in 10..20u32 {
+                    let next = if n == 19 { 10 } else { n + 1 };
+                    b.stream(n, &form(&format!("/X {next} 0 R")), b"/X Do", &[]);
+                }
+            }),
+            &[],
+            "Ten forms drawing each other in a ring",
+        ),
+        bad(
+            DRAW_LOOP,
+            "appearance-self",
+            {
+                let mut doc = Doc::new();
+                doc.annots = vec![20];
+                let mut b = doc.builder();
+                b.object(
+                    20,
+                    "<< /Type /Annot /Subtype /Stamp /Rect [72 600 272 700] /AP << /N 21 0 R >> >>",
+                )
+                .stream(21, &form("/FRM 21 0 R"), b"/FRM Do", &[]);
+                b.build()
+            },
+            &[],
+            "Annotation appearance that draws itself (never on the page's content)",
+        ),
+    ]
+}
+
+fn function_size_lookalikes() -> Vec<Fixture> {
+    vec![
+        good(
+            FUNCTION_SIZE,
+            "exact-limit",
+            shading(
+                "/FunctionType 0 /Domain [0 1 0 1] /Range [0 1 0 1 0 1 0 1] /Size [4096 4096] /BitsPerSample 8",
+            ),
+            &[],
+            "Exactly 64 MiB declared (the largest allowed)",
+        ),
+        bad(
+            FUNCTION_SIZE,
+            "just-over",
+            shading(
+                "/FunctionType 0 /Domain [0 1 0 1] /Range [0 1 0 1 0 1 0 1] /Size [4097 4096] /BitsPerSample 8",
+            ),
+            &[],
+            "64 MiB plus one row",
+        ),
+        good(
+            FUNCTION_SIZE,
+            "cmyk-lut",
+            shading(
+                "/FunctionType 0 /Domain [0 1 0 1 0 1 0 1] /Range [0 1 0 1 0 1 0 1] /Size [33 33 33 33] /BitsPerSample 16",
+            ),
+            &[],
+            "4-input 33-point CMYK lookup table, 16 bits (9 MiB, as colour conversion makes)",
+        ),
+        good(
+            FUNCTION_SIZE,
+            "tint-transform",
+            drawing(|b| {
+                b.stream(
+                    10,
+                    &format!("{FORM} /Resources << /ColorSpace << /CS0 [/Separation /Gold /DeviceCMYK 11 0 R] >> >>"),
+                    b"/CS0 cs 1 scn 0 0 100 100 re f",
+                    &[],
+                )
+                .stream(11, "/FunctionType 0 /Domain [0 1] /Range [0 1 0 1 0 1 0 1] /Size [256] /BitsPerSample 8", &[0u8; 1024], &[]);
+            }),
+            &[],
+            "Spot colour (Separation) with a 256-sample tint transform",
+        ),
+        good(
+            FUNCTION_SIZE,
+            "stitching",
+            shading_with(
+                "/FunctionType 3 /Domain [0 1] /Functions [13 0 R 14 0 R] /Bounds [0.5] /Encode [0 1 0 1]",
+                |b| {
+                    b.stream(13, "/FunctionType 0 /Domain [0 1] /Range [0 1 0 1 0 1] /Size [256] /BitsPerSample 8", &[0u8; 768], &[])
+                        .object(14, "<< /FunctionType 2 /Domain [0 1] /C0 [0 0 0] /C1 [1 1 1] /N 1 /Size [99999 99999] >>");
+                },
+            ),
+            &[],
+            "Gradient stitching a sampled and an exponential function (a stray `/Size` on the latter)",
+        ),
+    ]
+}
+
 pub(super) fn all() -> Vec<Fixture> {
     [
         font_malformed(),
@@ -1126,6 +1645,11 @@ pub(super) fn all() -> Vec<Fixture> {
         xml_external_reference(),
         draw_recursion(),
         function_size(),
+        xfa_script_lookalikes(),
+        dangerous_uri_lookalikes(),
+        xml_external_reference_lookalikes(),
+        draw_recursion_lookalikes(),
+        function_size_lookalikes(),
     ]
     .concat()
 }

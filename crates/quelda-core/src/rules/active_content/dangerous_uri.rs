@@ -3,7 +3,7 @@
 //! reports every link; this one only those that are never ordinary links.
 
 use crate::facts::{Ctx, Location};
-use crate::parser::Dict;
+use crate::parser::{Dict, PdfObject};
 use crate::rules::values::values;
 use crate::rules::{Action, Category, Findings, Rule, RuleMeta, Severity, Stage};
 
@@ -23,7 +23,9 @@ static META: RuleMeta = RuleMeta {
         path such as C:\\ or \\\\server\\share), or a Windows protocol handler with a \
         history of exploits (ms-*: such as ms-msdt:, search-ms:, mhtml:, shell:, jar:). \
         Clicking one can run code in a web-based viewer, open a program, or send the \
-        user's Windows credentials (NTLM hash) to another machine. Compared the way \
+        user's Windows credentials (NTLM hash) to another machine. Also a document \
+        base URI (/URI << /Base … >> in the catalog) of these kinds, which turns every \
+        relative link into one. Compared the way \
         browsers parse URLs: case-insensitive, tabs and line breaks removed, leading \
         spaces and control characters ignored, UTF-16 strings read. http, https, mailto, \
         ftp, tel and relative links are not reported.",
@@ -118,12 +120,20 @@ impl Rule for DangerousUri {
     }
 
     fn check_dict(&self, dict: &Dict, loc: &Location, ctx: &Ctx, out: &mut Findings) {
-        if !values(ctx, dict, "S").any(|s| s.is_name("URI")) {
-            return;
-        }
+        let is_action = values(ctx, dict, "S").any(|s| s.is_name("URI"));
         let found = values(ctx, dict, "URI")
-            .filter_map(|v| v.as_string())
-            .find_map(|raw| danger(raw).map(|why| format!("{why}: {}", excerpt(raw))));
+            .find_map(|v| match v {
+                PdfObject::String(raw) if is_action => {
+                    danger(raw).map(|why| format!("{why}: {}", excerpt(raw)))
+                }
+                // The catalog's URI dictionary: relative links resolve against /Base.
+                PdfObject::Dict(d) => values(ctx, d, "Base")
+                    .filter_map(PdfObject::as_string)
+                    .find_map(|raw| {
+                        danger(raw).map(|why| format!("base URI, {why}: {}", excerpt(raw)))
+                    }),
+                _ => None,
+            });
         if let Some(d) = found {
             out.report(&META, loc, Some(d));
         }
@@ -187,12 +197,15 @@ mod tests {
         let src = b"1 0 obj << /S /URI /URI (javascript:x) >> endobj\n\
             2 0 obj << /A << /S /URI /URI 3 0 R >> >> endobj\n3 0 obj (\\\\\\\\host\\\\s) endobj\n\
             4 0 obj << /S /URI /URI (https://example.com) >> endobj\n\
-            5 0 obj << /Type /Annot /URI (javascript:x) >> endobj\n";
+            5 0 obj << /Type /Annot /URI (javascript:x) >> endobj\n\
+            6 0 obj << /Type /Catalog /URI << /Base (file:///share/) >> >> endobj\n\
+            7 0 obj << /Type /Catalog /URI 8 0 R >> endobj\n8 0 obj << /Base (https://example.com/) >> endobj\n";
         assert_eq!(
             hits(src),
             vec![
                 "1 0: javascript: link: javascript:x".to_string(),
                 "2 0: network share (UNC path): \\\\host\\s".to_string(),
+                "6 0: base URI, file: link: file:///share/".to_string(),
             ]
         );
     }

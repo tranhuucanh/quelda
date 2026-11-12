@@ -66,8 +66,8 @@ Code and actions that run in a PDF reader.
 | `ACTIVE.LAUNCH` 🔒 | Launch actions, which open or run a file or program on the reader's computer. | block | block | block |
 | `ACTIVE.OPEN_ACTION` | An action that runs automatically when the document opens. Opening at a page (a plain destination) is not reported. | block | block | warn |
 | `ACTIVE.OTHER_ACTIONS` | Other interactive actions (named, rendition, hide, layer state, sound, movie…), used to chain or hide content. | block | warn | warn |
-| `ACTIVE.XFA_SCRIPT` | Scripts (JavaScript or FormCalc) in an XFA form's XML, which Acrobat runs like document JavaScript. Empty `<script/>` elements left by form designers are not reported. | block | block | warn |
-| `ACTIVE.DANGEROUS_URI` | Links that run a script or reach the local machine or a network share: `javascript:`, `vbscript:`, `data:`, `file:`, `smb:`, `\\server\share`, Windows paths, `ms-*:` handlers (`ms-msdt:`, Follina), `search-ms:`. Can run code in web viewers or leak Windows credentials (NTLM). Ordinary links (`http`, `https`, `mailto`, `ftp`, `tel`, relative) are not reported. | block | block | warn |
+| `ACTIVE.XFA_SCRIPT` | Scripts (JavaScript or FormCalc) in an XFA form's XML, which Acrobat runs like document JavaScript. Empty `<script/>` elements left by form designers, the config packet's `<script>` settings (`<runScripts>`, …) and form data fields named `script` are not reported. | block | block | warn |
+| `ACTIVE.DANGEROUS_URI` | Links that run a script or reach the local machine or a network share: `javascript:`, `vbscript:`, `data:`, `file:`, `smb:`, `\\server\share`, Windows paths, `ms-*:` handlers (`ms-msdt:`, Follina), `search-ms:`; also a document base URI (`/URI << /Base … >>`) of these kinds, which relative links resolve against. Can run code in web viewers or leak Windows credentials (NTLM). Ordinary links (`http`, `https`, `mailto`, `ftp`, `tel`, relative) are not reported. | block | block | warn |
 
 ## Embedded content (`embedded`)
 
