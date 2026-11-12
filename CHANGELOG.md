@@ -13,7 +13,9 @@ match more files, is listed under **Rules** because it can change verdicts.
 ### Rules
 
 Eight new rules (53 in all). On the real files we test with (147 files, 739 embedded fonts,
-78 ICC profiles, 1,547 links, one signed file), no verdict changed in any preset.
+78 ICC profiles, 1,547 links, one signed file), no verdict changed in any preset. Each rule
+is also tested on generated files shaped like real ones those lack (complete LiveCycle
+forms, intranet and app links, nested artwork, colour lookup tables), malicious and not.
 
 - `ACTIVE.XFA_SCRIPT` (new; block, block, warn): a script (JavaScript or FormCalc) in an
   XFA form's XML, which Acrobat runs like document JavaScript; `ACTIVE.JAVASCRIPT` only
@@ -25,8 +27,9 @@ Eight new rules (53 in all). On the real files we test with (147 files, 739 embe
   `data:`, `file:`, `smb:`, a network share (`\\server\share`), a Windows path or an
   `ms-*:` / `search-ms:` protocol handler: runs code in web viewers or leaks Windows
   credentials. A document base URI of these kinds (`/URI << /Base … >>` in the catalog),
-  which turns relative links into such links, is reported too. Read the way browsers read URLs (case, tabs, leading control characters,
-  UTF-16). Ordinary links keep `EXTERNAL.URI` (warn in balanced).
+  which turns relative links into such links, is reported too. Read the way browsers read
+  URLs (case, tabs, leading control characters, UTF-16). Ordinary links keep `EXTERNAL.URI`
+  (warn in balanced).
 - `XML.EXTERNAL_REFERENCE` (new; block, block, warn): XInclude, `<?xml-stylesheet?>` or an
   XFA web service connection in XMP or XFA: the XML parser fetches a file or a URL.
 - `RESOURCE.DRAW_RECURSION` (new; block, block, warn): a form, tiling pattern, soft mask or
@@ -34,7 +37,6 @@ Eight new rules (53 in all). On the real files we test with (147 files, 739 embe
   Judged on the calls content makes, not on resource lists.
 - `RESOURCE.FUNCTION_SIZE` (new; block, block, warn): a sampled function declaring more
   than 64 MiB of samples (memory bomb).
-
 - `CODEC.FONT_MALFORMED` (new; block in strict and balanced, warn in permissive): an
   embedded TrueType, OpenType or CFF font whose tables or indexes point outside the font
   (table directory or table past the end, short `head`, glyph offsets past `glyf`, CFF
