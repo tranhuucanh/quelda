@@ -1,16 +1,18 @@
 # quelda — PDF & Illustrator security scanner
 
-Checks **PDF and Adobe Illustrator (`.ai`) files** for attacks, right in the browser, before
-they are uploaded. It never renders or previews the file.
+Stops malicious **PDF and Adobe Illustrator (`.ai`) files** right in the browser, before they
+are uploaded. It never renders or previews the file.
 
-- **WebAssembly in a Web Worker**: a scan never blocks the page, and the file never leaves
-  the user's machine.
-- **Any frontend**: Vite, webpack, esbuild, plain HTML with `<script type="module">`, or
-  straight from a CDN with no build step; any framework (React, Vue, Svelte, …) on top.
-  [Every setup below](#works-with) is tested in a real browser.
-- **56 rules, fail-closed**: anything it cannot fully inspect is invalid.
-- **Fast and light**: files are read in place, never loaded whole; a 1 GB file scans in under a
-  second with a few MB of engine memory ([numbers](#speed-and-memory)).
+| Why quelda | |
+|---|---|
+| 🌐 **One engine, browser + server** | Same rules, same verdict here and in the [server version](https://github.com/tranhuucanh/quelda) |
+| ⚡ **WebAssembly in the browser, near-native speed** | 500 PDF files in 0.82 s, in a Web Worker: the page never freezes, files never leave the machine |
+| 🛡️ **Tested on real attacks** | ~32,000 real PDF files (malware, exploits, clean documents): 98.9 % of attacks rejected in strict mode, 0 clean files blocked by mistake ([results](#tested-on-real-attacks)) |
+| 🧱 **No crash on complex PDFs** | Tested on 900,000 objects, and 505,000 objects in 5,000 compressed object streams |
+| 🪶 **Fast and light** | One 1 GB PDF in 0.8 s with 2.4 MB of engine memory: files are read in place, never loaded whole ([numbers](#-speed-and-memory)) |
+| 🎚️ **3 modes, any rule on/off** | `strict` · `balanced` · `permissive`, then `{ rules: { 'EXTERNAL.URI': 'off' } }` ([modes](#-modes-strict-balanced-permissive)) |
+| 🧩 **Any frontend** | Vite, webpack, esbuild, plain HTML, CDN; React, Vue, Svelte… ([tested in a real browser](#-works-with)) |
+| 🔒 **56 rules, fail-closed** | Anything it cannot fully inspect is invalid |
 
 > **The browser is not a security boundary.** A check in the browser gives users instant
 > feedback and saves a pointless upload, but anyone can skip it and send a file straight to
@@ -18,15 +20,7 @@ they are uploaded. It never renders or previews the file.
 > ImageMagick or any other PDF processor. quelda has a server version with the same engine and
 > the same verdicts: see the [project page](https://github.com/tranhuucanh/quelda).
 
-## Documentation
-
-| Guide | Read it to |
-|---|---|
-| [**Rules**](https://github.com/tranhuucanh/quelda/blob/main/docs/rules.md) | See every rule: what it catches, and whether it blocks, warns or is off in each preset |
-| [**Policies**](https://github.com/tranhuucanh/quelda/blob/main/docs/policy.md) | Choose a preset, write your own policy, relax or tighten one rule, raise limits |
-| [**Server version**](https://github.com/tranhuucanh/quelda) | Scan the same files again on your server, with the same verdicts |
-
-## Speed and memory
+## ⚡ Speed and memory
 
 Scan time and engine memory of the WebAssembly engine on an Apple M2 Pro (Node 22).
 
@@ -65,7 +59,7 @@ document, and still answers in seconds, with bounded memory, without crashing:
 | 4 page streams, 480 MiB once decompressed | 53 MB | 3.7 s | 271 MB |
 | Arrays nested 100,000 levels deep (parser crash attack) | 0.2 MB | < 0.01 s | 1.6 MB |
 
-## What quelda checks
+## 🔍 What quelda checks
 
 **56 rules in 11 categories**, plus 12 engine safeguards that refuse to judge what cannot be
 fully inspected. Full list with explanations: [docs/rules.md](https://github.com/tranhuucanh/quelda/blob/main/docs/rules.md).
@@ -84,12 +78,28 @@ fully inspected. Full list with explanations: [docs/rules.md](https://github.com
 | `codecs` | 7 | JBIG2 (FORCEDENTRY), JPEG 2000, Type 1 fonts, out-of-spec decoder parameters, malformed fonts and ICC colour profiles |
 | `resource` | 5 | Pixel bombs, gigantic or broken pages, page-count bombs, drawing loops, huge colour function tables |
 
-**Tested on thousands of cases**: attack variants of every rule, clean look-alikes that must not
-trigger a rule, damaged and disguised files, and real-world PDFs. The test files are not
-published, because antivirus software may flag them; if you need them, email the maintainer
-(tranhuucanh39@gmail.com).
+### Tested on real attacks
 
-## Modes: strict, balanced, permissive
+| Dataset | From | Contents |
+|---|---|---|
+| [CIC-Evasive-PDFMal2022](https://www.unb.ca/cic/datasets/pdfmal-2022.html) | Canadian Institute for Cybersecurity | Real malware and clean documents |
+| [PDF Insecurity](https://pdf-insecurity.org/) (incl. PDF101) | Ruhr University Bochum | Attacks on PDF readers, signatures and encryption |
+
+| ~32,000 files | balanced (default) | strict |
+|---|---|---|
+| 🔴 Attack files | ✅ 95.4 % rejected | ✅ 98.9 % rejected |
+| 🟢 Clean files | ✅ 0 rejected by a rule mistake | |
+
+- **Clean files rejected on purpose:** those that carry JavaScript, attachments or
+  encryption, which balanced blocks. Relax that one rule if your users need them.
+- **Attacks still accepted:** mostly phishing documents that are only a link (quelda cannot
+  judge a URL) and signed files changed after signing (a warning in balanced).
+
+Every rule is also tested on generated files: attack variants, clean look-alikes that must not
+trigger it, damaged and disguised files. The test files are not published, because antivirus
+software may flag them; if you need them, email the maintainer (tranhuucanh39@gmail.com).
+
+## 🎚️ Modes: strict, balanced, permissive
 
 **Every rule runs in every mode.** A mode (preset) only decides what a finding does:
 **block** (the file is rejected), **warn** (reported, the file is accepted) or **off**.
@@ -111,7 +121,15 @@ from a mode, then change single rules: `{ "preset": "strict", "rules": { "EXTERN
 A few rules differ from their category; the action of every rule in every mode is in
 [rules.md](https://github.com/tranhuucanh/quelda/blob/main/docs/rules.md), and how to write a policy in [policy.md](https://github.com/tranhuucanh/quelda/blob/main/docs/policy.md).
 
-## Install
+## 📚 Documentation
+
+| Guide | Read it to |
+|---|---|
+| [**Rules**](https://github.com/tranhuucanh/quelda/blob/main/docs/rules.md) | See every rule: what it catches, and whether it blocks, warns or is off in each preset |
+| [**Policies**](https://github.com/tranhuucanh/quelda/blob/main/docs/policy.md) | Choose a preset, write your own policy, relax or tighten one rule, raise limits |
+| [**Server version**](https://github.com/tranhuucanh/quelda) | Scan the same files again on your server, with the same verdicts |
+
+## 📦 Install
 
 ```bash
 npm install quelda
@@ -119,7 +137,7 @@ npm install quelda
 
 Or no install at all: load it from a CDN ([below](#no-build-step-cdn)).
 
-## Quick start
+## 🚀 Quick start
 
 ```ts
 import { createScanner } from 'quelda';
@@ -179,7 +197,7 @@ not be fully inspected: damaged, over a limit, or the scan failed). Full format:
 </script>
 ```
 
-(With a bundler, put the script in your app code. Without one, see [Works with](#works-with).)
+(With a bundler, put the script in your app code. Without one, see [Works with](#-works-with).)
 
 ### Deeply nested folders
 
@@ -277,9 +295,9 @@ Public npm CDNs such as [jsDelivr](https://www.jsdelivr.com/package/npm/quelda) 
 to set up, the URL works as soon as a version is on npm. Pin a version in production
 (`…/npm/quelda@X.Y.Z/dist/index.js`, the version from `npm view quelda version`) so a new
 release cannot change your verdicts unannounced. The package starts its worker from the CDN by
-itself. To serve the files from your own server instead, see [No bundler](#works-with).
+itself. To serve the files from your own server instead, see [No bundler](#-works-with).
 
-## Works with
+## 🧩 Works with
 
 The package is plain ESM. It ships the worker (`dist/worker.js`) and the engine
 (`dist/wasm/quelda_bg.wasm`, a separate file, not inlined) next to the API and finds them with
@@ -321,14 +339,14 @@ CDN in `script-src` and `connect-src`.
 
 **Browsers:** module workers and WebAssembly SIMD: Chrome/Edge 91+, Firefox 114+, Safari 16.4+.
 
-## Supported files
+## 📄 Supported files
 
 Files are identified by content, not by extension. **PDF** and **modern `.ai` files**
 (Illustrator 9 and later, which are PDF inside) are scanned. **PostScript, EPS and legacy `.ai`**
 (Illustrator 8 and earlier) are always rejected with `FILETYPE.POSTSCRIPT_MAGIC`, a locked rule:
 PostScript is a programming language and cannot be proven safe by a scan.
 
-## API
+## 🔌 API
 
 ### `createScanner(options?)`
 
@@ -346,10 +364,10 @@ Starts the worker and resolves once the engine is loaded. Rejects with a `Quelda
 - `input`: `File`, `Blob`, `ArrayBuffer`, or any typed array / `DataView` (`Uint8Array`,
   …). Only the bytes of a view are scanned.
 - `policy`: a policy object, or policy JSON text. Default `{}` = the `balanced` preset. See
-  [Policy](#policy).
+  [Policy](#-policy).
 - `options.timeoutMs`: overrides the scanner's timeout for this scan.
 - `options.signal`: an `AbortSignal`.
-- `options.transfer`: see [Memory](#memory-and-transfer).
+- `options.transfer`: see [Memory](#-memory-and-transfer).
 
 **`scan` never rejects.** Every failure becomes a verdict with `status: "ERROR"` and
 `valid: false` (fail-closed):
@@ -387,7 +405,7 @@ sorted by `id`. Handy for a settings screen. Rejects with a `QueldaError`.
 Kills the worker. Pending scans resolve with `ENGINE.ABORTED`; later calls fail. Safe to call
 twice.
 
-## Policy
+## 📋 Policy
 
 **Every rule always runs**: a policy starts from a preset and changes the action (`block`,
 `warn`, `off`) of the categories and rules you name; everything else keeps its preset action.
@@ -406,7 +424,7 @@ await scanner.scan(file, {
 });
 ```
 
-What each preset does: [Modes](#modes-strict-balanced-permissive).
+What each preset does: [Modes](#-modes-strict-balanced-permissive).
 
 Defaults are strict on purpose. If a rule blocks files your users legitimately upload, relax
 **that rule** rather than the whole category or preset. For example, `EMBED.EMBEDDED_FILE`
@@ -439,7 +457,7 @@ const policy = { ...serverPolicy, rules: Object.fromEntries(
 
 (The server must keep using the full policy.)
 
-## Memory and transfer
+## 🧠 Memory and transfer
 
 Prefer passing the `File` / `Blob` itself (limit: `limits.max_file_bytes`, default 256 MiB).
 
@@ -455,13 +473,13 @@ Prefer passing the `File` / `Blob` itself (limit: `limits.max_file_bytes`, defau
   whole) to the worker without a copy. **Your buffer is detached (length 0) as soon as `scan`
   is called.** A view of part of a buffer is still copied.
 
-## Node
+## 💻 Node
 
 The package targets browsers. Node (≥ 20) has no Web Workers, so `createScanner()` does not
 work there out of the box; on a server, use the server version from the
 [project page](https://github.com/tranhuucanh/quelda).
 
-## License
+## 📜 License
 
 [MIT](https://github.com/tranhuucanh/quelda/blob/main/LICENSE).
 

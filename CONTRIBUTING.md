@@ -1,6 +1,6 @@
 # Contributing
 
-Build and test commands: [README, Development](README.md#development). Run them all before
+Build and test commands: [README, Development](README.md#-development). Run them all before
 opening a pull request; CI runs the same ones. Security issues go through
 [SECURITY.md](SECURITY.md), never a public issue.
 

@@ -307,7 +307,10 @@ fn table_rows(md: &str) -> Vec<(String, Vec<String>)> {
     let mut rows = Vec::new();
     for line in md.lines() {
         if let Some(h) = line.strip_prefix("## ") {
-            section = h.to_string();
+            // README headings start with an icon: `## ⚡ Speed and memory`.
+            section = h
+                .trim_start_matches(|c: char| !c.is_alphanumeric())
+                .to_string();
         } else if line.starts_with("| `") {
             let cells = line
                 .trim_matches('|')
@@ -393,7 +396,7 @@ fn readme_showcase_counts_match_the_registry() {
     for doc in ["README.md", "packages/quelda-js/README.md"] {
         let md = read(doc);
         assert!(md.contains(&header), "{doc}: {header}");
-        let section = &md[md.find("## What quelda checks").unwrap()..];
+        let section = &md[md.find(" What quelda checks\n").unwrap()..];
         let section = &section[..section[3..].find("\n## ").unwrap()];
         let rows = table_rows(section);
         assert_eq!(rows.len(), Category::ALL.len(), "{doc}");
