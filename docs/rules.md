@@ -1,5 +1,7 @@
 # Rules
 
+**English** | [日本語](rules.ja.md)
+
 quelda has **56 rules in 11 categories**. Each one looks for one thing that attackers use against
 PDF readers and server-side PDF tools (Ghostscript, ImageMagick, print RIPs, thumbnailers), or
 that makes different PDF software see different documents. On top of the rules, the engine

@@ -1,5 +1,7 @@
 # quelda — PDF & Illustrator security scanner
 
+**English** | [日本語](README.ja.md)
+
 quelda scans **PDF and Illustrator (`.ai`) files** for malicious content, with **the same rules
 and the same verdicts in the browser and on your server**.
 
@@ -104,7 +106,7 @@ Every rule is also tested on generated files: attack variants, clean look-alikes
 trigger it, damaged and disguised files. The test files are not published, because antivirus
 software may flag them; if you need them, email the maintainer (tranhuucanh39@gmail.com).
 
-## 🎚️ Modes: strict, balanced, permissive
+## 🎚 Modes: strict, balanced, permissive
 
 **Every rule runs in every mode.** A mode (preset) only decides what a finding does:
 **block** (the file is rejected), **warn** (reported, the file is accepted) or **off**.

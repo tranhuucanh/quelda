@@ -1,5 +1,7 @@
 # Policies
 
+**English** | [日本語](policy.ja.md)
+
 A policy tells quelda how strict to be: which findings make a file invalid (`block`), which
 are only reported (`warn`) and which are ignored (`off`), plus the engine's size limits and a
 few detection thresholds. The same policy JSON works in the CLI and in the npm package, and gives

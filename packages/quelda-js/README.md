@@ -1,5 +1,7 @@
 # quelda — PDF & Illustrator security scanner
 
+**English** | [日本語](https://github.com/tranhuucanh/quelda/blob/main/packages/quelda-js/README.ja.md)
+
 Stops malicious **PDF and Adobe Illustrator (`.ai`) files** right in the browser, before they
 are uploaded. It never renders or previews the file.
 
@@ -100,7 +102,7 @@ Every rule is also tested on generated files: attack variants, clean look-alikes
 trigger it, damaged and disguised files. The test files are not published, because antivirus
 software may flag them; if you need them, email the maintainer (tranhuucanh39@gmail.com).
 
-## 🎚️ Modes: strict, balanced, permissive
+## 🎚 Modes: strict, balanced, permissive
 
 **Every rule runs in every mode.** A mode (preset) only decides what a finding does:
 **block** (the file is rejected), **warn** (reported, the file is accepted) or **off**.

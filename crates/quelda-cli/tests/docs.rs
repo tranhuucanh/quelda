@@ -7,7 +7,8 @@
 //!   runs (exit 0 on a clean `upload.pdf`);
 //! - the tables of docs/rules.md, docs/policy.md and the README showcases (repo, npm)
 //!   (rules, preset actions, locked rules, limits, thresholds, engine errors,
-//!   counts) are what the engine does.
+//!   counts) are what the engine does, in English and in Japanese (`*.ja.md`);
+//! - a Japanese doc has the same code blocks, headings and tables as the English one.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -295,6 +296,75 @@ fn documented_commands_run() {
 
 // ---- docs/rules.md, docs/policy.md, README: tables == the engine ----
 
+/// The docs in one language: `README.md` or `README.ja.md`, and the words the
+/// table checks look for. `{r}` rules, `{c}` categories, `{s}` engine
+/// safeguards, `{list}` the category keys, `{n}` the filter chain limit.
+struct Lang {
+    ext: &'static str,
+    rules_count: &'static str,
+    safeguards: &'static str,
+    checks_section: &'static str,
+    modes_section: &'static str,
+    presets_section: &'static str,
+    reference_section: &'static str,
+    errors_section: &'static str,
+    locked_rules: &'static str,
+    categories_line: &'static str,
+    filter_chain: &'static str,
+}
+
+const LANGS: [Lang; 2] = [
+    Lang {
+        ext: ".md",
+        rules_count: "**{r} rules in {c} categories**",
+        safeguards: ", plus {s} engine safeguards",
+        checks_section: " What quelda checks\n",
+        modes_section: "Modes: strict, balanced, permissive",
+        presets_section: "Presets",
+        reference_section: "Reference",
+        errors_section: "Engine errors",
+        locked_rules: "**Locked rules**",
+        categories_line: "Categories: {list}.",
+        filter_chain: "more than {n} filters (fixed)",
+    },
+    Lang {
+        ext: ".ja.md",
+        rules_count: "**{c} カテゴリ、{r} 個のルール**",
+        safeguards: "に加え、{s} 個のエンジン保護機能",
+        checks_section: " quelda が検査する内容\n",
+        modes_section: "モード: strict, balanced, permissive",
+        presets_section: "プリセット",
+        reference_section: "リファレンス",
+        errors_section: "エンジンエラー",
+        locked_rules: "**ロックされたルール**",
+        categories_line: "カテゴリ: {list}。",
+        filter_chain: "{n} 個を超えるフィルタ（固定）",
+    },
+];
+
+impl Lang {
+    /// `docs/rules` → `docs/rules.md` or `docs/rules.ja.md`.
+    fn doc(&self, stem: &str) -> String {
+        format!("{stem}{}", self.ext)
+    }
+}
+
+/// `template` with each `{key}` replaced by its value.
+fn fill(template: &str, vars: &[(&str, String)]) -> String {
+    vars.iter().fold(template.to_string(), |t, (k, v)| {
+        t.replace(&format!("{{{k}}}"), v)
+    })
+}
+
+fn rules_count() -> Vec<(&'static str, String)> {
+    vec![
+        ("r", registry().len().to_string()),
+        ("c", Category::ALL.len().to_string()),
+        // POLICY.INVALID is not a safeguard.
+        ("s", (IssueCode::ALL.len() - 1).to_string()),
+    ]
+}
+
 use quelda_core::error::IssueCode;
 use quelda_core::limits::{Limits, Thresholds};
 use quelda_core::policy::{Policy, Preset, presets, resolve};
@@ -351,53 +421,56 @@ fn registry() -> Vec<RuleInfo> {
 
 #[test]
 fn rules_md_lists_every_rule_with_its_preset_actions() {
-    let md = read("docs/rules.md");
     let rules = registry();
-    let rows = table_rows(&md);
-    assert_eq!(rows.len(), rules.len(), "one row per rule");
-    for (section, cells) in rows {
-        let (id, locked) = code_cell(&cells[0]);
-        let meta = quelda_core::rules::registry::all()
-            .iter()
-            .map(|r| r.meta())
-            .find(|m| m.id == id)
-            .unwrap_or_else(|| panic!("docs/rules.md: unknown rule {id}"));
-        assert!(
-            section.ends_with(&format!("(`{}`)", meta.category.key())),
-            "{id} is under `{section}`"
-        );
-        assert_eq!(locked, meta.locked, "{id}: 🔒");
-        for (i, p) in Preset::ALL.into_iter().enumerate() {
-            assert_eq!(
-                cells[2 + i],
-                action(resolve(meta, &preset_policy(p))),
-                "{id} under {}",
-                p.key()
+    for lang in &LANGS {
+        let doc = lang.doc("docs/rules");
+        let md = read(&doc);
+        let rows = table_rows(&md);
+        assert_eq!(rows.len(), rules.len(), "{doc}: one row per rule");
+        for (section, cells) in rows {
+            let (id, locked) = code_cell(&cells[0]);
+            let meta = quelda_core::rules::registry::all()
+                .iter()
+                .map(|r| r.meta())
+                .find(|m| m.id == id)
+                .unwrap_or_else(|| panic!("{doc}: unknown rule {id}"));
+            assert!(
+                section.ends_with(&format!("(`{}`)", meta.category.key())),
+                "{doc}: {id} is under `{section}`"
             );
+            assert_eq!(locked, meta.locked, "{doc}: {id}: 🔒");
+            for (i, p) in Preset::ALL.into_iter().enumerate() {
+                assert_eq!(
+                    cells[2 + i],
+                    action(resolve(meta, &preset_policy(p))),
+                    "{doc}: {id} under {}",
+                    p.key()
+                );
+            }
         }
+        let header = fill(lang.rules_count, &rules_count());
+        assert!(md.contains(&header), "{doc}: {header}");
     }
-    let header = format!(
-        "**{} rules in {} categories**",
-        rules.len(),
-        Category::ALL.len()
-    );
-    assert!(md.contains(&header), "docs/rules.md: {header}");
 }
 
 #[test]
 fn readme_showcase_counts_match_the_registry() {
     let rules = registry();
-    let header = format!(
-        "**{} rules in {} categories**, plus {} engine safeguards",
-        rules.len(),
-        Category::ALL.len(),
-        IssueCode::ALL.len() - 1 // POLICY.INVALID is not a safeguard
-    );
-    for doc in ["README.md", "packages/quelda-js/README.md"] {
-        let md = read(doc);
+    for (lang, stem) in LANGS
+        .iter()
+        .flat_map(|l| ["README", "packages/quelda-js/README"].map(|s| (l, s)))
+    {
+        let doc = lang.doc(stem);
+        let md = read(&doc);
+        let header = fill(
+            &format!("{}{}", lang.rules_count, lang.safeguards),
+            &rules_count(),
+        );
         assert!(md.contains(&header), "{doc}: {header}");
-        let section = &md[md.find(" What quelda checks\n").unwrap()..];
-        let section = &section[..section[3..].find("\n## ").unwrap()];
+        let section = &md[md
+            .find(lang.checks_section)
+            .unwrap_or_else(|| panic!("{doc}: no section{}", lang.checks_section))..];
+        let section = &section[..section.find("\n## ").unwrap()];
         let rows = table_rows(section);
         assert_eq!(rows.len(), Category::ALL.len(), "{doc}");
         for (_, cells) in rows {
@@ -411,14 +484,22 @@ fn readme_showcase_counts_match_the_registry() {
 
 #[test]
 fn policy_md_presets_match_the_engine() {
-    let md = read("docs/policy.md");
+    for lang in &LANGS {
+        policy_md_presets(lang);
+    }
+}
+
+fn policy_md_presets(lang: &Lang) {
+    let doc = lang.doc("docs/policy");
+    let md = read(&doc);
     let rows = table_rows(&md);
+    let presets_section = lang.presets_section;
     // Category table: category, what it covers, strict, balanced, permissive.
     let cats: Vec<_> = rows
         .iter()
-        .filter(|(s, c)| s == "Presets" && !c[0].contains('.'))
+        .filter(|(s, c)| s == presets_section && !c[0].contains('.'))
         .collect();
-    assert_eq!(cats.len(), Category::ALL.len());
+    assert_eq!(cats.len(), Category::ALL.len(), "{doc}");
     for (_, cells) in &cats {
         let (key, _) = code_cell(&cells[0]);
         let cat = Category::ALL
@@ -429,7 +510,7 @@ fn policy_md_presets_match_the_engine() {
             assert_eq!(
                 cells[2 + i],
                 action(presets::category_action(p, cat)),
-                "{key}"
+                "{doc}: {key}"
             );
         }
     }
@@ -437,14 +518,14 @@ fn policy_md_presets_match_the_engine() {
     let mut listed = Vec::new();
     for (_, cells) in rows
         .iter()
-        .filter(|(s, c)| s == "Presets" && c[0].contains('.'))
+        .filter(|(s, c)| s == presets_section && c[0].contains('.'))
     {
         let (id, _) = code_cell(&cells[0]);
         for (i, p) in Preset::ALL.into_iter().enumerate() {
             assert_eq!(
                 cells[1 + i],
                 action(presets::rule_override(p, &id).unwrap()),
-                "{id}"
+                "{doc}: {id}"
             );
         }
         listed.push(id);
@@ -458,18 +539,18 @@ fn policy_md_presets_match_the_engine() {
         .collect();
     listed.sort();
     want.sort();
-    assert_eq!(listed, want, "rules that differ from their category");
+    assert_eq!(listed, want, "{doc}: rules that differ from their category");
     // Locked list.
     for r in all {
         let m = r.meta();
         let named = md.contains(&format!("`{}`", m.id));
         if m.locked {
-            assert!(named, "policy.md: locked rule {} not listed", m.id);
+            assert!(named, "{doc}: locked rule {} not listed", m.id);
         }
     }
     let locked_line = md
         .lines()
-        .skip_while(|l| !l.starts_with("**Locked rules**"))
+        .skip_while(|l| !l.starts_with(lang.locked_rules))
         .take_while(|l| !l.is_empty())
         .collect::<Vec<_>>()
         .join(" ");
@@ -483,22 +564,28 @@ fn policy_md_presets_match_the_engine() {
     assert_eq!(
         n,
         all.iter().filter(|r| r.meta().locked).count(),
-        "{locked_line}"
+        "{doc}: {locked_line}"
     );
 }
 
 #[test]
 fn policy_md_reference_matches_the_engine() {
-    let md = read("docs/policy.md");
+    for lang in &LANGS {
+        policy_md_reference(lang);
+    }
+}
+
+fn policy_md_reference(lang: &Lang) {
+    let doc = lang.doc("docs/policy");
+    let md = read(&doc);
     let keys: Vec<String> = Category::ALL
         .iter()
         .map(|c| format!("`{}`", c.key()))
         .collect();
     let flat = md.split_whitespace().collect::<Vec<_>>().join(" ");
-    assert!(
-        flat.contains(&format!("Categories: {}.", keys.join(", "))),
-        "policy.md: category list"
-    );
+    let list = fill(lang.categories_line, &[("list", keys.join(", "))]);
+    assert!(flat.contains(&list), "{doc}: {list}");
+    let reference = lang.reference_section;
     let rows = table_rows(&md);
     let first_number = |cell: &str| -> f64 {
         cell.trim_matches('`')
@@ -544,14 +631,14 @@ fn policy_md_reference_matches_the_engine() {
     ];
     let got: Vec<_> = rows
         .iter()
-        .filter(|(s, _)| s == "Reference")
+        .filter(|(s, _)| s == reference)
         .filter(|(_, c)| c[2].starts_with("`LIMIT."))
         .collect();
-    assert_eq!(got.len(), limits.len());
+    assert_eq!(got.len(), limits.len(), "{doc}");
     for ((_, cells), (name, default, code)) in got.iter().zip(limits) {
-        assert_eq!(code_cell(&cells[0]).0, name);
-        assert_eq!(first_number(&cells[1]), default, "{name}");
-        assert_eq!(cells[2], format!("`{code}`"), "{name}");
+        assert_eq!(code_cell(&cells[0]).0, name, "{doc}");
+        assert_eq!(first_number(&cells[1]), default, "{doc}: {name}");
+        assert_eq!(cells[2], format!("`{code}`"), "{doc}: {name}");
     }
     let t = Thresholds::default();
     let thresholds = [
@@ -575,14 +662,14 @@ fn policy_md_reference_matches_the_engine() {
     ];
     let got: Vec<_> = rows
         .iter()
-        .filter(|(s, c)| s == "Reference" && c.len() == 3 && !c[2].starts_with("`LIMIT."))
+        .filter(|(s, c)| s == reference && c.len() == 3 && !c[2].starts_with("`LIMIT."))
         .filter(|(_, c)| c[0].starts_with("`max_"))
         .collect();
-    assert_eq!(got.len(), thresholds.len());
+    assert_eq!(got.len(), thresholds.len(), "{doc}");
     for ((_, cells), (name, default, rule)) in got.iter().zip(thresholds) {
-        assert_eq!(code_cell(&cells[0]).0, name);
-        assert_eq!(first_number(&cells[1]), default, "{name}");
-        assert_eq!(cells[2], format!("`{rule}`"), "{name}");
+        assert_eq!(code_cell(&cells[0]).0, name, "{doc}");
+        assert_eq!(first_number(&cells[1]), default, "{doc}: {name}");
+        assert_eq!(cells[2], format!("`{rule}`"), "{doc}: {name}");
     }
     // The schema documents the same limit and threshold names.
     let schema = read("schemas/policy.schema.json");
@@ -597,21 +684,25 @@ fn policy_md_reference_matches_the_engine() {
 
 #[test]
 fn policy_md_lists_every_engine_error() {
-    let md = read("docs/policy.md");
-    let codes: Vec<String> = table_rows(&md)
-        .into_iter()
-        .filter(|(s, _)| s == "Engine errors")
-        .map(|(_, c)| code_cell(&c[0]).0)
-        .collect();
     let want: Vec<String> = IssueCode::ALL
         .iter()
         .map(|c| c.as_str().to_string())
         .collect();
-    assert_eq!(codes, want);
-    assert!(md.contains(&format!(
-        "more than {} filters (fixed)",
-        quelda_core::filters::MAX_FILTER_CHAIN
-    )));
+    for lang in &LANGS {
+        let doc = lang.doc("docs/policy");
+        let md = read(&doc);
+        let codes: Vec<String> = table_rows(&md)
+            .into_iter()
+            .filter(|(s, _)| s == lang.errors_section)
+            .map(|(_, c)| code_cell(&c[0]).0)
+            .collect();
+        assert_eq!(codes, want, "{doc}");
+        let chain = fill(
+            lang.filter_chain,
+            &[("n", quelda_core::filters::MAX_FILTER_CHAIN.to_string())],
+        );
+        assert!(md.contains(&chain), "{doc}: {chain}");
+    }
 }
 
 #[test]
@@ -648,19 +739,32 @@ const LINKED_DOCS: &[&str] = &[
     "packages/quelda-js/README.md",
     "schemas/README.md",
     "fuzz/README.md",
+    "README.ja.md",
+    "docs/cli.ja.md",
+    "docs/policy.ja.md",
+    "docs/rules.ja.md",
+    "packages/quelda-js/README.ja.md",
 ];
 
 const GITHUB: &str = "https://github.com/tranhuucanh/quelda/";
 
-/// GitHub's heading anchor: lowercase, spaces → `-`, punctuation dropped.
+/// GitHub's heading anchor: lowercase, every character that is not a word
+/// character (`\p{Word}`: letters, digits, marks, `_`, joiners), `-` or a space
+/// dropped, spaces → `-`. Marks stay: `🎚️` keeps its invisible U+FE0F.
 fn slug(heading: &str) -> String {
+    let mark = |c: char| {
+        matches!(c,
+            '\u{0300}'..='\u{036F}' | '\u{1AB0}'..='\u{1AFF}' | '\u{1DC0}'..='\u{1DFF}'
+            | '\u{20D0}'..='\u{20FF}' | '\u{3099}'..='\u{309A}' | '\u{FE00}'..='\u{FE0F}'
+            | '\u{FE20}'..='\u{FE2F}' | '\u{E0100}'..='\u{E01EF}' | '\u{200C}' | '\u{200D}')
+    };
     heading
         .trim()
         .to_lowercase()
         .chars()
         .filter_map(|c| match c {
             ' ' => Some('-'),
-            c if c.is_alphanumeric() || c == '-' || c == '_' => Some(c),
+            c if c.is_alphanumeric() || mark(c) || c == '-' || c == '_' => Some(c),
             _ => None,
         })
         .collect()
@@ -708,46 +812,58 @@ fn links(md: &str) -> Vec<String> {
 
 /// Every link to a file of this repo (relative, or github.com/…/blob|tree/main/…)
 /// points at a file that exists, and every `#anchor` at a heading of it.
+/// The file of this repo a link of `doc` goes to (relative, or
+/// github.com/…/blob|tree/main/…; the project page is `README.md`), and its
+/// `#anchor`. `None` for a link outside the repo.
+fn link_target(doc: &str, link: &str) -> Option<(PathBuf, Option<String>)> {
+    let (path, anchor) = match link.split_once('#') {
+        Some((p, a)) => (p, Some(a.to_string())),
+        None => (link, None),
+    };
+    let local = if path == GITHUB.trim_end_matches('/') {
+        PathBuf::from("README.md")
+    } else if let Some(rest) = path.strip_prefix(GITHUB) {
+        match rest.split_once("/main/") {
+            Some((kind, p)) if kind == "blob" || kind == "tree" => PathBuf::from(p),
+            _ => {
+                assert!(
+                    rest.is_empty()
+                        || ["releases", "releases/latest", "issues"]
+                            .contains(&rest.trim_end_matches('/')),
+                    "{doc}: unexpected GitHub link {link}"
+                );
+                return None;
+            }
+        }
+    } else if path.starts_with("http") || path.starts_with("mailto:") {
+        return None;
+    } else if path.is_empty() {
+        PathBuf::from(doc)
+    } else {
+        Path::new(doc).parent().unwrap().join(path)
+    };
+    Some((local, anchor))
+}
+
+/// Every link to a file of this repo points at a file that exists, and every
+/// `#anchor` at a heading of it.
 #[test]
 fn doc_links_resolve() {
     let mut n = 0;
     for doc in LINKED_DOCS {
-        let dir = Path::new(doc).parent().unwrap();
         for link in links(&read(doc)) {
-            let (path, anchor) = match link.split_once('#') {
-                Some((p, a)) => (p.to_string(), Some(a.to_string())),
-                None => (link.clone(), None),
+            let Some((local, anchor)) = link_target(doc, &link) else {
+                continue;
             };
-            let local = if let Some(rest) = path.strip_prefix(GITHUB) {
-                match rest.split_once("/main/") {
-                    Some((kind, p)) if kind == "blob" || kind == "tree" => Some(PathBuf::from(p)),
-                    _ => {
-                        assert!(
-                            rest.is_empty()
-                                || ["releases", "releases/latest", "issues"]
-                                    .contains(&rest.trim_end_matches('/')),
-                            "{doc}: unexpected GitHub link {link}"
-                        );
-                        None
-                    }
-                }
-            } else if path.starts_with("http") || path.starts_with("mailto:") {
-                None
-            } else if path.is_empty() {
-                Some(PathBuf::from(doc))
-            } else {
-                Some(dir.join(&path))
-            };
-            let Some(local) = local else { continue };
             let file = repo().join(&local);
             assert!(file.exists(), "{doc}: broken link {link}");
             if let Some(a) = anchor {
-                let target = if file.is_dir() {
+                let file = if file.is_dir() {
                     file.join("README.md")
                 } else {
                     file
                 };
-                let text = fs::read_to_string(&target).unwrap();
+                let text = fs::read_to_string(&file).unwrap();
                 assert!(
                     anchors(&text).contains(&a),
                     "{doc}: no heading #{a} in {link}"
@@ -771,17 +887,28 @@ fn slug_matches_github() {
     );
     assert_eq!(slug(" No build step (CDN)"), "no-build-step-cdn");
     assert_eq!(slug(" README, Development"), "readme-development");
+    assert_eq!(slug(" ⚡ 速度とメモリ"), "-速度とメモリ");
+    assert_eq!(
+        slug(" 🎚 モード: strict, balanced, permissive"),
+        "-モード-strict-balanced-permissive"
+    );
+    // Seen on github.com: the variation selector of `🎚️` stays in the anchor.
+    assert_eq!(slug(" 🎚\u{FE0F} Modes"), "\u{FE0F}-modes");
 }
 
 /// The "Modes" tables of both READMEs group the categories by their action in
 /// each preset; together they list every category once.
 #[test]
 fn readme_modes_match_the_presets() {
-    for doc in ["README.md", "packages/quelda-js/README.md"] {
-        let md = read(doc);
+    for (lang, stem) in LANGS
+        .iter()
+        .flat_map(|l| ["README", "packages/quelda-js/README"].map(|s| (l, s)))
+    {
+        let doc = lang.doc(stem);
+        let md = read(&doc);
         let rows: Vec<_> = table_rows(&md)
             .into_iter()
-            .filter(|(s, _)| s == "Modes: strict, balanced, permissive")
+            .filter(|(s, _)| s == lang.modes_section)
             .collect();
         assert_eq!(rows.len(), 3, "{doc}");
         let mut seen = Vec::new();
@@ -806,5 +933,154 @@ fn readme_modes_match_the_presets() {
         let mut all: Vec<_> = Category::ALL.iter().map(|c| c.key().to_string()).collect();
         all.sort();
         assert_eq!(seen, all, "{doc}");
+    }
+}
+
+// ---- translations ----
+
+/// The layout of a doc outside code blocks: heading levels, the cells of each
+/// table row (a cell in backticks as written, others only counted), and the
+/// list items.
+#[derive(Debug, PartialEq)]
+struct Shape {
+    headings: Vec<usize>,
+    tables: Vec<Vec<Option<String>>>,
+    list_items: Vec<String>,
+}
+
+fn shape(md: &str) -> Shape {
+    let mut fenced = false;
+    let mut s = Shape {
+        headings: Vec::new(),
+        tables: Vec::new(),
+        list_items: Vec::new(),
+    };
+    for line in md.lines() {
+        if line.starts_with("```") {
+            fenced = !fenced;
+        } else if fenced {
+        } else if line.starts_with('#') {
+            s.headings
+                .push(line.chars().take_while(|&c| c == '#').count());
+        } else if line.starts_with('|') {
+            s.tables.push(
+                line.trim_matches('|')
+                    .split(" | ")
+                    .map(|c| c.trim())
+                    .map(|c| {
+                        let code = c.starts_with('`')
+                            && (c.ends_with('`') || c.ends_with('🔒'))
+                            && c.matches('`').count() == 2;
+                        code.then(|| c.to_string())
+                    })
+                    .collect(),
+            );
+        } else if let Some(marker) = ["- ", "1. ", "2. ", "3. ", "4. ", "5. "]
+            .into_iter()
+            .find(|m| line.trim_start().starts_with(m))
+        {
+            s.list_items.push(format!(
+                "{}{marker}",
+                &line[..line.len() - line.trim_start().len()]
+            ));
+        }
+    }
+    s
+}
+
+/// `docs/cli.ja.md` → `docs/cli.md`.
+fn english(path: &Path) -> PathBuf {
+    let s = path.to_str().unwrap();
+    PathBuf::from(
+        s.strip_suffix(".ja.md")
+            .map_or(s.to_string(), |b| format!("{b}.md")),
+    )
+}
+
+/// The links of `doc` below the language switch, each as the English file it
+/// stands for and the index of the heading it goes to (outside links as written),
+/// checking that each one stays in the language of `doc`.
+fn link_map(doc: &str) -> Vec<(String, Option<usize>)> {
+    let md = read(doc);
+    let body: String = md.lines().skip(3).collect::<Vec<_>>().join("\n");
+    let ja = doc.ends_with(".ja.md");
+    links(&body)
+        .into_iter()
+        .map(|link| match link_target(doc, &link) {
+            None => (link, None),
+            Some((file, anchor)) => {
+                let name = file.to_str().unwrap();
+                let translated = english(&file) != file;
+                let has_ja = name.ends_with(".md")
+                    && repo()
+                        .join(english(&file).to_str().unwrap().replace(".md", ".ja.md"))
+                        .exists();
+                assert_eq!(
+                    translated,
+                    ja && has_ja,
+                    "{doc}: {link} leaves the language of the doc"
+                );
+                let heading = anchor.map(|a| {
+                    anchors(&read(name))
+                        .iter()
+                        .position(|h| *h == a)
+                        .unwrap_or_else(|| panic!("{doc}: no heading #{a} in {link}"))
+                });
+                (english(&file).to_str().unwrap().to_string(), heading)
+            }
+        })
+        .collect()
+}
+
+/// Code blocks, with the body of a plain `text` block (prose, translated) left
+/// out; a marked block (real output) is code.
+fn code_blocks(md: &str) -> Vec<(Option<String>, String, Option<String>)> {
+    blocks(md)
+        .into_iter()
+        .map(|(marker, info, body)| {
+            let prose = marker.is_none() && info == "text";
+            (marker, info, (!prose).then_some(body))
+        })
+        .collect()
+}
+
+/// A Japanese doc is the English one translated: the same code blocks, word for
+/// word (commands, examples and outputs stay tested once), the same headings and
+/// tables, and a link to the other language at the top of each.
+#[test]
+fn japanese_docs_match_the_english_ones() {
+    for stem in [
+        "README",
+        "packages/quelda-js/README",
+        "docs/cli",
+        "docs/policy",
+        "docs/rules",
+    ] {
+        let en = read(&format!("{stem}.md"));
+        let ja = read(&format!("{stem}.ja.md"));
+        assert_eq!(
+            code_blocks(&ja),
+            code_blocks(&en),
+            "{stem}.ja.md: code blocks"
+        );
+        assert_eq!(
+            shape(&ja),
+            shape(&en),
+            "{stem}.ja.md: headings, tables, lists"
+        );
+        assert_eq!(
+            link_map(&format!("{stem}.ja.md")),
+            link_map(&format!("{stem}.md")),
+            "{stem}.ja.md: the same links, to the same sections"
+        );
+        let top = |md: &str| md.lines().take(3).collect::<Vec<_>>().join("\n");
+        assert!(
+            top(&en).contains("[日本語]("),
+            "{stem}.md: link to Japanese"
+        );
+        assert!(
+            top(&ja).contains("[English]("),
+            "{stem}.ja.md: link to English"
+        );
     }
 }

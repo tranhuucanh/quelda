@@ -28,6 +28,7 @@ describe('npm pack', () => {
     const expected = [
       'LICENSE',
       'README.md',
+      'README.ja.md', // npm always ships README*
       'package.json',
       ...modules.flatMap((m) => [`dist/${m}.js`, `dist/${m}.d.ts`]),
       'dist/wasm/quelda.js',

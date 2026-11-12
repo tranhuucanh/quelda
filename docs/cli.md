@@ -1,5 +1,7 @@
 # quelda CLI
 
+**English** | [日本語](cli.ja.md)
+
 `quelda` scans a file, or whole folders of them, and prints a verdict: valid or invalid, with
 the reason for each rule the file violates. It is a single static binary with no runtime dependencies, meant to be called by a
 backend written in any language before a file reaches Ghostscript, ImageMagick or any other PDF
