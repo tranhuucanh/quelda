@@ -769,7 +769,7 @@ fn simple_rule_goods() -> Vec<Fixture> {
                     10,
                     "<< /Type /FontDescriptor /FontName /QueldaTT /Flags 32 /FontBBox [0 0 1000 1000] /ItalicAngle 0 /Ascent 800 /Descent -200 /CapHeight 700 /StemV 80 /FontFile2 20 0 R >>",
                 )
-                .stream(20, "/Length1 11", b"quelda-test", &[]);
+                .stream(20, "", &super::rules_03::valid_truetype(), &[]);
                 b.build()
             },
             &[],
@@ -875,7 +875,7 @@ fn extra_rule_variants() -> Vec<Fixture> {
             XFA,
             "xfa-script",
             acroform_doc("/XFA 20 0 R", Some(XFA_SCRIPT)),
-            &[ACROFORM],
+            &[ACROFORM, "ACTIVE.XFA_SCRIPT"],
             "XFA <script> JS",
         ),
         bad(

@@ -8,6 +8,69 @@ engine share one version.
 Rule IDs never change meaning or disappear. A new rule, or a rule that starts to
 match more files, is listed under **Rules** because it can change verdicts.
 
+## [0.3.0] — unreleased
+
+### Rules
+
+Eight new rules (53 in all). On the real files we test with (147 files, 739 embedded fonts,
+78 ICC profiles, 1,547 links, one signed file), no verdict changed in any preset. Each rule
+is also tested on generated files shaped like real ones those lack (complete LiveCycle
+forms, intranet and app links, nested artwork, colour lookup tables), malicious and not.
+
+- `ACTIVE.XFA_SCRIPT` (new; block, block, warn): a script (JavaScript or FormCalc) in an
+  XFA form's XML, which Acrobat runs like document JavaScript; `ACTIVE.JAVASCRIPT` only
+  saw JavaScript in PDF dictionaries, and `FORMS.XFA` only warns in balanced, so such forms
+  passed by default. Empty `<script/>` elements, the `<script>` settings of the config
+  packet (`<runScripts>`, `<currentPage>`, `<exclude>`) and form data fields named
+  `script` are not reported.
+- `ACTIVE.DANGEROUS_URI` (new; block, block, warn): a link to `javascript:`, `vbscript:`,
+  `data:`, `file:`, `smb:`, a network share (`\\server\share`), a Windows path or an
+  `ms-*:` / `search-ms:` protocol handler: runs code in web viewers or leaks Windows
+  credentials. A document base URI of these kinds (`/URI << /Base … >>` in the catalog),
+  which turns relative links into such links, is reported too. Read the way browsers read
+  URLs (case, tabs, leading control characters, UTF-16). Ordinary links keep `EXTERNAL.URI`
+  (warn in balanced).
+- `XML.EXTERNAL_REFERENCE` (new; block, block, warn): XInclude, `<?xml-stylesheet?>` or an
+  XFA web service connection in XMP or XFA: the XML parser fetches a file or a URL.
+- `RESOURCE.DRAW_RECURSION` (new; block, block, warn): a form, tiling pattern, soft mask or
+  Type 3 glyph that draws itself, directly or through others (renderers crash or hang).
+  Judged on the calls content makes, not on resource lists.
+- `RESOURCE.FUNCTION_SIZE` (new; block, block, warn): a sampled function declaring more
+  than 64 MiB of samples (memory bomb).
+- `CODEC.FONT_MALFORMED` (new; block in strict and balanced, warn in permissive): an
+  embedded TrueType, OpenType or CFF font whose tables or indexes point outside the font
+  (table directory or table past the end, short `head`, glyph offsets past `glyf`, CFF
+  INDEX offsets out of order or past the end, CharStrings or Private data past the end),
+  or a `/FontFile2` that is not a TrueType font. Type 1 fonts stay with `CODEC.TYPE1_FONT`;
+  a font that does not decompress completely is not judged.
+- `CODEC.ICC_MALFORMED` (new; block, block, warn): an embedded ICC colour profile without
+  the `acsp` signature, shorter than its header, with a tag table that does not fit, or with
+  a tag past both the end of the profile and the size it declares. A truncated profile
+  (some OCR tools embed the first part of sRGB) is not judged by its tags.
+- `STRUCT.SIGNATURE_MODIFIED` (new; block, warn, off): a signed file changed after it was
+  signed: bytes after the signed ranges, signed ranges that leave out more than the
+  signature value, or a malformed `/ByteRange`. Only the structure is checked, not the
+  cryptography.
+
+### Added
+
+- CLI `--rule ID=action` (`off`, `warn` or `block`; repeat it for more rules): change one rule
+  without writing JSON, e.g. `quelda scan file.pdf --rule EXTERNAL.URI=off`. It wins over the
+  same rule in `--policy` / `--policy-json`.
+- CLI `quelda help policy`: how to change rules, with examples and the policy fields.
+- The CLI warns on stderr when a policy lowers a locked rule without `unsafe_allow_unlock`:
+  the rule still blocks, as before, but now says so instead of staying silent.
+
+### Changed
+
+- CLI `--help`: shorter, with the common options and examples; the first line says the
+  version and what quelda is. `quelda help scan` lists every scan option by group.
+- CLI short options: `-p` (`--preset`), `-f` (`--format`) and `-v` (`--version`, as `-V`).
+- Package descriptions (Cargo, npm, Homebrew) now say "PDF & Illustrator security scanner:
+  files + policy in, verdict out".
+- Embedded fonts and ICC profiles are decompressed to check their structure, each within
+  the decode limits but not counted in the scan's total.
+
 ## [0.2.0] — 2026-11-11
 
 ### Added

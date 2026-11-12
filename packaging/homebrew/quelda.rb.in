@@ -2,7 +2,7 @@
 # edit in the tap (changes are overwritten). Source:
 # https://github.com/tranhuucanh/quelda/blob/main/packaging/homebrew/quelda.rb.in
 class Quelda < Formula
-  desc "PDF security scanner: one PDF and a policy in, a verdict out"
+  desc "PDF & Illustrator security scanner: files + policy in, verdict out"
   homepage "https://github.com/tranhuucanh/quelda"
   @MACOS_ARM@
   license "MIT"

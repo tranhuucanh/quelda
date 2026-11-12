@@ -300,6 +300,38 @@ impl<'a> Ctx<'a> {
         Some(StreamData(outcome))
     }
 
+    /// Decoded data of an opaque stream (font program, ICC profile) for
+    /// rules that check its structure. Decoded on a budget of its own (the
+    /// scan's limits, not charged to the scan), never cached, never an
+    /// issue: opaque data a reader cannot decode is not inspected (design
+    /// §4.4). `None`: not a stream, or its data does not decode completely
+    /// (a truncated program is not judged by its structure).
+    pub fn decode_opaque(&self, object: usize) -> Option<Cow<'a, [u8]>> {
+        if let Some(o) = self.cache.borrow().get(&object) {
+            return match &**o {
+                DecodeOutcome::Complete(d) => Some(d.clone()),
+                _ => None,
+            };
+        }
+        let stream = self.doc.objects.get(object)?.object.as_stream()?;
+        match self.run_decode(stream, &mut Budget::new(&self.limits)) {
+            DecodeOutcome::Complete(d) => Some(d),
+            _ => None,
+        }
+    }
+
+    /// Length of the input in bytes.
+    pub fn file_len(&self) -> usize {
+        self.input.len()
+    }
+
+    /// Raw input bytes in `range`, for rules that check offsets a file
+    /// declares about itself (a signature's `/ByteRange`). `None`: out of
+    /// the file, or unreadable.
+    pub fn raw(&self, range: std::ops::Range<usize>) -> Option<Cow<'a, [u8]>> {
+        self.input.read(range)
+    }
+
     /// Decodes stream `objects[object]` and records issues, once: the
     /// outcome is cached while the cache owns at most [`KEEP_DECODED`]
     /// bytes. A stream decoded once but not kept is decoded again for each

@@ -64,10 +64,13 @@ fn verdict(out: &Output) -> Value {
         _ => 2,
     };
     assert_eq!(out.status.code(), Some(want), "{text}");
+    // Only the warning about a locked rule the policy tried to lower.
+    let err = String::from_utf8_lossy(&out.stderr);
     assert!(
-        out.stderr.is_empty(),
-        "{}",
-        String::from_utf8_lossy(&out.stderr)
+        err.lines().all(
+            |l| l.starts_with("quelda: warning: ") && l.contains(" is locked and still blocks")
+        ),
+        "{err}"
     );
     v
 }
@@ -255,7 +258,7 @@ fn rules_and_version() {
     );
 
     let version = env!("CARGO_PKG_VERSION");
-    for args in [&["--version"][..], &["-V"], &["version"]] {
+    for args in [&["--version"][..], &["-V"], &["-v"], &["version"]] {
         let out = run(args);
         assert_eq!(out.status.code(), Some(0));
         let text = String::from_utf8(out.stdout).unwrap();
@@ -267,13 +270,18 @@ fn rules_and_version() {
     assert_eq!(v["version"], version);
     assert_eq!(v["rules"], n);
 
-    let out = run(&["--help"]);
-    assert_eq!(out.status.code(), Some(0));
-    assert!(
-        String::from_utf8(out.stdout)
-            .unwrap()
-            .contains("Exit codes")
-    );
+    for flag in ["--help", "-h"] {
+        let out = run(&[flag]);
+        assert_eq!(out.status.code(), Some(0));
+        let help = String::from_utf8(out.stdout).unwrap();
+        assert!(
+            help.starts_with(&format!(
+                "quelda {version} — PDF & Illustrator security scanner\n"
+            )),
+            "{help}"
+        );
+        assert!(help.contains("Exit: 0 PASS"), "{help}");
+    }
 }
 
 /// Runs `jobs` on a few threads (each one spawns the binary).

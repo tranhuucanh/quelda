@@ -35,7 +35,7 @@ Anything you do not name keeps its preset action. So this policy:
 }
 ```
 
-means: *all 45 rules run with the `strict` actions, except that the `external` category only
+means: *all 53 rules run with the `strict` actions, except that the `external` category only
 warns, and `EXTERNAL.URI` (ordinary hyperlinks) is ignored*. It does **not** mean "run only the
 external rules". A rule set to `off` is skipped; there is no way to add rules through a policy.
 
@@ -67,9 +67,9 @@ turn these off; it can only raise the [limits](#limits). See [Engine errors](#en
 | `external` | Links, remote documents, form submission, network file references | block | warn | off |
 | `forms` | AcroForm and XFA forms | block | warn | off |
 | `structure` | Damaged or ambiguous structure (xref, duplicates, trailing data, …) | block | warn | off |
-| `codecs` | Risky image codecs (JBIG2, JPEG 2000), Type 1 fonts | block | warn | off |
+| `codecs` | Risky image codecs (JBIG2, JPEG 2000), fonts and colour profiles | block | warn | off |
 
-Seven rules differ from their category:
+Nine rules differ from their category:
 
 | Rule | strict | balanced | permissive | Why |
 |---|---|---|---|---|
@@ -80,6 +80,8 @@ Seven rules differ from their category:
 | `EXTERNAL.OPI` | block | block | warn | Same: the printed image is a file the PDF names. Old OPI workflows can use `permissive`. |
 | `STRUCT.NAME_TOO_LONG` | block | block | block | Never written by real producers; aimed at renderer buffers. |
 | `CODEC.DECODE_PARAMS` | block | block | block | Never written by real producers; aimed at decoder buffers. |
+| `CODEC.FONT_MALFORMED` | block | block | warn | Font tools never write them; `permissive` only warns, for archives of old, damaged files. |
+| `CODEC.ICC_MALFORMED` | block | block | warn | Same, for colour profiles. |
 
 **Locked rules** block in every preset (even `permissive`, where their category would only warn):
 `FILETYPE.POSTSCRIPT_MAGIC`, `FILETYPE.NOT_PDF_HEADER`, `FILETYPE.FOREIGN_MAGIC`,
@@ -104,11 +106,15 @@ Start from a preset and change only what you need. In the CLI:
 ```bash
 quelda scan upload.pdf --preset strict                     # a preset only
 quelda scan upload.pdf --policy policy.json                # a policy file
+quelda scan upload.pdf --rule EXTERNAL.URI=off              # one rule, no JSON
 quelda scan upload.pdf --policy-json '{"rules": {"EXTERNAL.URI": "off"}}'
 quelda scan upload.pdf --policy policy.json --preset strict --stop-on-first
 ```
 
-`--preset` replaces the `preset` of the policy file; `--stop-on-first` sets `stop_on_first`.
+`--preset` replaces the `preset` of the policy file; `--rule ID=action` (repeatable) sets one
+entry of `rules`, winning over the file; `--stop-on-first` sets `stop_on_first`. A locked rule
+lowered without `unsafe_allow_unlock` still blocks, and the CLI prints a warning on stderr.
+`quelda help policy` prints a summary of this page.
 
 In the npm package, pass the same object:
 
@@ -192,9 +198,11 @@ Guardrails that keep a scan's time and memory bounded. A file over a limit is `E
 | `max_decoded_bytes_total` | `536870912` (512 MiB) | `LIMIT.DECODED_BYTES` |
 | `max_compression_ratio` | `1000` | `LIMIT.COMPRESSION_RATIO` |
 
-Images, fonts and attachments are never decompressed (they are not needed to judge the file),
-so the decode limits only count data the engine must read: page contents, object streams, XML,
-and streams of unknown role.
+Images and attachments are never decompressed (they are not needed to judge the file), so the
+decode limits only count data the engine must read: page contents, object streams, XML, and
+streams of unknown role. Embedded fonts and ICC colour profiles are decompressed to check their
+structure, each within the same limits but not counted in the scan's total; one that hits a
+limit is not judged.
 
 ### Thresholds
 

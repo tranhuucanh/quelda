@@ -8,7 +8,7 @@ they are uploaded. It never renders or previews the file.
 - **Any frontend**: Vite, webpack, esbuild, plain HTML with `<script type="module">`, or
   straight from a CDN with no build step; any framework (React, Vue, Svelte, …) on top.
   [Every setup below](#works-with) is tested in a real browser.
-- **45 rules, fail-closed**: anything it cannot fully inspect is invalid.
+- **53 rules, fail-closed**: anything it cannot fully inspect is invalid.
 - **Fast and light**: files are read in place, never loaded whole; a 1 GB file scans in under a
   second with a few MB of engine memory ([numbers](#speed-and-memory)).
 
@@ -41,8 +41,7 @@ Scan time and engine memory of the WebAssembly engine on an Apple M2 Pro (Node 2
 
 ### Deeply nested folders
 
-The [server version](https://github.com/tranhuucanh/quelda) scans every file in a folder tree, including deeply nested subdirectories in parallel, one per CPU core, and reports each file by its full path; in the browser, files are scanned one at a time, see
-[A whole folder](#a-whole-folder):
+The [server version](https://github.com/tranhuucanh/quelda) scans every file in a folder tree, including deeply nested subdirectories in parallel, one per CPU core, and reports each file by its full path; in the browser, files are scanned one at a time.
 
 | Folder | Jobs | Time | Peak memory |
 |---|---:|---:|---:|
@@ -65,6 +64,52 @@ document, and still answers in seconds, with bounded memory, without crashing:
 | 999 incremental updates, 100,000 objects | 7 MB | 0.20 s | 34 MB |
 | 4 page streams, 480 MiB once decompressed | 53 MB | 3.7 s | 271 MB |
 | Arrays nested 100,000 levels deep (parser crash attack) | 0.2 MB | < 0.01 s | 1.6 MB |
+
+## What quelda checks
+
+**53 rules in 11 categories**, plus 12 engine safeguards that refuse to judge what cannot be
+fully inspected. Full list with explanations: [docs/rules.md](https://github.com/tranhuucanh/quelda/blob/main/docs/rules.md).
+
+| Category | Rules | Catches, for example |
+|---|---|---|
+| `filetype` | 4 | PostScript/EPS/legacy `.ai` renamed to `.pdf` (even behind a BOM or a printer header), SVG/HTML/MVG/ZIP/executables disguised as PDF, PDF + ZIP/HTML polyglots |
+| `postscript` | 3 | PostScript code inside a PDF: the `PS` operator, PostScript XObjects, non-standard Type 4 functions |
+| `active_content` | 7 | JavaScript (anywhere, any encoding, XFA form scripts), Launch actions, actions run on open or on events, links to scripts, local files or network shares |
+| `embedded` | 4 | Attached files, file attachment annotations, portfolios, Flash/3D/multimedia |
+| `external` | 7 | Links, remote documents (SMB credential leaks), form submission to a URL, network file references, images read from outside the file (external streams, OPI) |
+| `forms` | 2 | AcroForm and XFA forms |
+| `xml` | 2 | DOCTYPE/ENTITY in XMP or XFA (XXE, billion laughs), XInclude and other external references, in UTF-8/16/32 |
+| `structure` | 12 | Tampered or ambiguous structure: hidden revisions, conflicting objects, mismatched xref, page-tree loops, data after `%%EOF`, multiple headers, oversized names, content that prints but is hidden on screen, files changed after signing |
+| `encryption` | 1 | Encrypted files whose content cannot be inspected |
+| `codecs` | 6 | JBIG2 (FORCEDENTRY), JPEG 2000, Type 1 fonts, out-of-spec decoder parameters, malformed fonts and ICC colour profiles |
+| `resource` | 5 | Pixel bombs, gigantic or broken pages, page-count bombs, drawing loops, huge colour function tables |
+
+**Tested on thousands of cases**: attack variants of every rule, clean look-alikes that must not
+trigger a rule, damaged and disguised files, and real-world PDFs. The test files are not
+published, because antivirus software may flag them; if you need them, email the maintainer
+(tranhuucanh39@gmail.com).
+
+## Modes: strict, balanced, permissive
+
+**Every rule runs in every mode.** A mode (preset) only decides what a finding does:
+**block** (the file is rejected), **warn** (reported, the file is accepted) or **off**.
+
+| Category | strict | balanced (default) | permissive |
+|---|---|---|---|
+| `filetype`, `postscript`, `encryption` | block | block | block |
+| `active_content`, `embedded`, `xml`, `resource` | block | block | warn |
+| `external`, `forms`, `structure`, `codecs` | block | warn | off |
+
+- **strict**: files from anyone go straight into Ghostscript, ImageMagick or a print RIP.
+  Rejects anything unusual, including links, forms and damaged structure.
+- **balanced**: blocks everything that can execute code, carry a payload or overload a server;
+  only warns about features common in normal documents.
+- **permissive**: files from sources you mostly trust.
+
+Locked rules (PostScript, Launch actions, files that are not PDF) block in every mode. Start
+from a mode, then change single rules: `{ "preset": "strict", "rules": { "EXTERNAL.URI": "warn" } }`.
+A few rules differ from their category; the action of every rule in every mode is in
+[rules.md](https://github.com/tranhuucanh/quelda/blob/main/docs/rules.md), and how to write a policy in [policy.md](https://github.com/tranhuucanh/quelda/blob/main/docs/policy.md).
 
 ## Install
 
@@ -136,7 +181,7 @@ not be fully inspected: damaged, over a limit, or the scan failed). Full format:
 
 (With a bundler, put the script in your app code. Without one, see [Works with](#works-with).)
 
-### A whole folder
+### Deeply nested folders
 
 `webkitdirectory` lets the user pick a folder; every file inside it, at any depth, comes with
 its path in `webkitRelativePath`:
@@ -276,52 +321,6 @@ CDN in `script-src` and `connect-src`.
 
 **Browsers:** module workers and WebAssembly SIMD: Chrome/Edge 91+, Firefox 114+, Safari 16.4+.
 
-## What quelda checks
-
-**45 rules in 11 categories**, plus 12 engine safeguards that refuse to judge what cannot be
-fully inspected. Full list with explanations: [docs/rules.md](https://github.com/tranhuucanh/quelda/blob/main/docs/rules.md).
-
-| Category | Rules | Catches, for example |
-|---|---|---|
-| `filetype` | 4 | PostScript/EPS/legacy `.ai` renamed to `.pdf` (even behind a BOM or a printer header), SVG/HTML/MVG/ZIP/executables disguised as PDF, PDF + ZIP/HTML polyglots |
-| `postscript` | 3 | PostScript code inside a PDF: the `PS` operator, PostScript XObjects, non-standard Type 4 functions |
-| `active_content` | 5 | JavaScript (anywhere, any encoding), Launch actions, actions run on open or on events |
-| `embedded` | 4 | Attached files, file attachment annotations, portfolios, Flash/3D/multimedia |
-| `external` | 7 | Links, remote documents (SMB credential leaks), form submission to a URL, network file references, images read from outside the file (external streams, OPI) |
-| `forms` | 2 | AcroForm and XFA forms |
-| `xml` | 1 | DOCTYPE/ENTITY in XMP or XFA (XXE, billion laughs), in UTF-8/16/32 |
-| `structure` | 11 | Tampered or ambiguous structure: hidden revisions, conflicting objects, mismatched xref, page-tree loops, data after `%%EOF`, multiple headers, oversized names, content that prints but is hidden on screen |
-| `encryption` | 1 | Encrypted files whose content cannot be inspected |
-| `codecs` | 4 | JBIG2 (FORCEDENTRY), JPEG 2000, Type 1 fonts, out-of-spec decoder parameters |
-| `resource` | 3 | Pixel bombs, gigantic or broken pages, page-count bombs |
-
-**Tested on thousands of cases**: attack variants of every rule, clean look-alikes that must not
-trigger a rule, damaged and disguised files, and real-world PDFs. The test files are not
-published, because antivirus software may flag them; if you need them, email the maintainer
-(tranhuucanh39@gmail.com).
-
-## Modes: strict, balanced, permissive
-
-**Every rule runs in every mode.** A mode (preset) only decides what a finding does:
-**block** (the file is rejected), **warn** (reported, the file is accepted) or **off**.
-
-| Category | strict | balanced (default) | permissive |
-|---|---|---|---|
-| `filetype`, `postscript`, `encryption` | block | block | block |
-| `active_content`, `embedded`, `xml`, `resource` | block | block | warn |
-| `external`, `forms`, `structure`, `codecs` | block | warn | off |
-
-- **strict**: files from anyone go straight into Ghostscript, ImageMagick or a print RIP.
-  Rejects anything unusual, including links, forms and damaged structure.
-- **balanced**: blocks everything that can execute code, carry a payload or overload a server;
-  only warns about features common in normal documents.
-- **permissive**: files from sources you mostly trust.
-
-Locked rules (PostScript, Launch actions, files that are not PDF) block in every mode. Start
-from a mode, then change single rules: `{ "preset": "strict", "rules": { "EXTERNAL.URI": "warn" } }`.
-A few rules differ from their category; the action of every rule in every mode is in
-[rules.md](https://github.com/tranhuucanh/quelda/blob/main/docs/rules.md), and how to write a policy in [policy.md](https://github.com/tranhuucanh/quelda/blob/main/docs/policy.md).
-
 ## Supported files
 
 Files are identified by content, not by extension. **PDF** and **modern `.ai` files**
@@ -446,7 +445,8 @@ Prefer passing the `File` / `Blob` itself (limit: `limits.max_file_bytes`, defau
 
 - `File` / `Blob` (recommended): **never loaded whole.** The worker reads it in place with
   `FileReaderSync`: one pass in 1 MiB blocks, then only the parts the engine must parse or
-  decode (image, font and other opaque data are not read again). The engine's memory stays
+  decode (images and other opaque data are not read again; fonts and colour profiles are read
+  once more to check their structure). The engine's memory stays
   a few MiB whatever the file size, plus the data it must decompress. Your object is
   untouched; the file must not change until the scan resolves (if it does: `ENGINE.READ`).
 - `ArrayBuffer` / typed array: **copied when `scan` is called**, then copied whole into

@@ -14,6 +14,7 @@ pub mod declarative;
 pub mod meta;
 pub mod registry;
 pub(crate) mod values;
+pub(crate) mod xml_text;
 
 use std::collections::HashMap;
 

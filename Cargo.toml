@@ -16,7 +16,7 @@ license = "MIT"
 authors = ["0xTh3OKrypt <tranhuucanh39@gmail.com>"]
 repository = "https://github.com/tranhuucanh/quelda"
 homepage = "https://github.com/tranhuucanh/quelda"
-description = "PDF security scanner: one PDF + policy in, verdict out"
+description = "PDF & Illustrator security scanner: files + policy in, verdict out"
 
 [workspace.dependencies]
 quelda-core = { path = "crates/quelda-core", version = "0.2.0" }

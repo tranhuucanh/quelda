@@ -34,71 +34,132 @@ const AUTHORS: &str = env!("CARGO_PKG_AUTHORS");
 const HOMEPAGE: &str = env!("CARGO_PKG_REPOSITORY");
 const LICENSE: &str = env!("CARGO_PKG_LICENSE");
 
+/// `quelda --help`; `{version}` is replaced by the version.
 const HELP: &str = "\
-quelda — PDF security scanner: one PDF + policy in, verdict out
+quelda {version} — PDF & Illustrator security scanner
 
 Usage:
-  quelda scan <file|-> [options]   Scan one file (`-`: stdin); verdict JSON on stdout
-  quelda scan <folder|file>... [options]
-                                   Scan folders (recursively) and files; one line per file
-  quelda rules [--format json|text]  List every rule
-  quelda version [--format json|text]
-  quelda --version | --help
+  quelda scan <file|folder>... [options]   Scan files and folders
+  quelda scan - [options]                  Scan stdin
+  quelda rules                             List every rule
+  quelda version                           Version and build
 
-Exit codes: 0 PASS, 1 REJECT, 2 ERROR, 64 usage error, 74 output error.
-Treat every exit code other than 0 as invalid.
+Common options:
+  -p, --preset <name>       strict | balanced (default) | permissive
+      --rule <ID>=<action>  Change one rule: off | warn | block (repeatable)
+      --policy <file>       Policy JSON file: turn rules off, raise or lower them
+      --policy-json <json>  Same, as a string
+  -f, --format <fmt>        json | jsonl | text | csv
+  -h, --help                Help (quelda help scan: every scan option;
+                            quelda help policy: how to change rules)
+  -v, --version             Version
 
-Run `quelda help scan` for scan options.
+Examples:
+  quelda scan file.pdf -f text
+  quelda scan uploads/ -f csv > report.csv
+  quelda scan file.pdf -p strict --rule EXTERNAL.URI=off
+
+Exit: 0 PASS · 1 REJECT · 2 ERROR · 64 usage. Anything but 0 = do not accept.
+Policies: https://github.com/tranhuucanh/quelda/blob/main/docs/policy.md
+More: https://github.com/tranhuucanh/quelda
 ";
 
 const HELP_SCAN: &str = "\
-quelda scan <file|-> [options]
-quelda scan <folder|file>... [options]
+quelda scan <file|folder>... [options]
+quelda scan - [options]                  (file read from stdin)
 
-Scans one file and prints the verdict (JSON by default) on stdout.
-`-` reads the file from stdin.
+One file: prints its verdict (JSON by default).
+Folders or several files: one result per file, in a fixed order (arguments
+in order, folders sorted by path). Folders are scanned with their
+subfolders, for .pdf and .ai files (any case); symbolic links are not
+followed. A summary goes to stderr (to stdout with -f text).
 
-With a folder or several files, prints one result per file in a fixed
-order (arguments in order, folders sorted by path): JSON Lines by default,
-each line {\"file\", \"sha256\", \"verdict\"}. Folders are scanned
-recursively for .pdf and .ai files (any case); symbolic links inside
-folders are not followed. A summary goes to stderr (to stdout with text).
+Policy:
+  -p, --preset <name>       strict | balanced (default) | permissive;
+                            replaces the preset of --policy / --policy-json
+      --rule <ID>=<action>  off | warn | block for one rule; repeat for more
+                            (beats --policy / --policy-json; quelda help policy)
+      --policy <file>       Policy JSON file (docs/policy.md)
+      --policy-json <json>  Policy as a JSON string
+      --stop-on-first       Stop at the first blocking finding (faster)
 
-Options:
-  --preset strict|balanced|permissive
-                         Preset (default: balanced, or the policy's preset).
-                         Overrides the preset in --policy / --policy-json.
-  --policy <file>        Policy JSON file (schemas/policy.schema.json).
-  --policy-json <json>   Policy as a JSON string.
-  --stop-on-first        Stop at the first blocking finding (faster, fewer reasons).
-  --format json|jsonl|text|csv
-                         Output format (default: json for one file, jsonl for
-                         several; json is for one file only).
-  --                     End of options (for a file name starting with `-`).
+Output:
+  -f, --format <fmt>        json   one file (default for one file)
+                            jsonl  one JSON line per file (default for several)
+                            text   easy to read, with a summary
+                            csv    one row per file
 
 Folders and several files:
-  --all                  Scan every file in folders, not only .pdf and .ai.
-  --absolute             Print absolute paths.
-  --no-hash              Do not compute each file's SHA-256 (sha256: null).
-  -j, --jobs <n>         Files scanned at once (default: one per CPU).
+  -j, --jobs <n>            Files scanned at once (default: one per CPU core)
+      --all                 Scan every file, not only .pdf and .ai
+      --absolute            Print absolute paths
+      --no-hash             Skip each file's SHA-256 (sha256: null)
 
-Exit codes: 0 PASS, 1 REJECT, 2 ERROR (including an invalid or unreadable
-policy, and a file that cannot be read), 64 usage error, 74 output error.
-Several files: 0 only when every file is PASS; 2 when any file is ERROR or
-nothing was found to scan; otherwise 1.
-Always pass arguments as an array (no shell) and set a timeout.
+Other:
+  -h, --help                This help
+      --                    End of options (a file name starting with -)
+
+Examples:
+  quelda scan file.pdf -p strict -f text
+  quelda scan uploads/ archive/ -j 4 -f csv > report.csv
+  quelda scan file.pdf --policy my-policy.json
+  quelda scan - < file.pdf
+
+Exit: 0 every file PASS · 1 a file REJECT · 2 a file ERROR, a bad policy or
+nothing to scan · 64 usage · 74 output error.
+From a program: pass arguments as an array (no shell) and set a timeout.
 ";
 
 const HELP_RULES: &str = "\
-quelda rules [--format json|text]
+quelda rules [-f json|text]
 
 Lists every rule the engine knows (ID, category, severity, default action,
 locked, message). JSON: schemas/rules.schema.json.
+
+Examples:
+  quelda rules -f text
+  quelda rules | jq -r '.[].id'
+";
+
+const HELP_POLICY: &str = "\
+How strict a scan is. Every rule always runs; a policy only chooses what
+each finding does:
+  block  the file is rejected (exit 1)
+  warn   reported, the file stays valid
+  off    the rule is skipped
+
+Start from a preset, then change single rules (the most specific wins):
+  quelda scan file.pdf -p strict
+  quelda scan file.pdf --rule EXTERNAL.URI=off --rule EMBED.EMBEDDED_FILE=warn
+
+Rule IDs and their default actions: quelda rules -f text
+Locked rules (marked [locked]) always block: lowering one prints a warning
+and has no effect, unless the policy sets \"unsafe_allow_unlock\": true.
+
+From a program, or for many changes, pass the policy as JSON:
+  quelda scan file.pdf --policy my-policy.json
+  quelda scan file.pdf --policy-json '{\"rules\":{\"EXTERNAL.URI\":\"off\"}}'
+
+  {
+    \"preset\": \"balanced\",
+    \"categories\": { \"external\": \"warn\" },
+    \"rules\": { \"EXTERNAL.URI\": \"off\" },
+    \"limits\": { \"max_file_bytes\": 52428800 },
+    \"stop_on_first\": false
+  }
+
+Every field is optional. Categories: filetype, postscript, active_content,
+embedded, external, forms, xml, structure, encryption, codecs, resource.
+-p and --rule beat the same settings in the JSON. A typo or an unknown rule
+ID is an ERROR (exit 2), never ignored.
+
+Every field, limit and recipe:
+https://github.com/tranhuucanh/quelda/blob/main/docs/policy.md
 ";
 
 const HELP_VERSION: &str = "\
-quelda version [--format json|text]
-quelda --version
+quelda version [-f json|text]
+quelda -v | --version
 
 Prints the version, commit, build date, number of rules and authors
 (text by default; --format json for programs).
@@ -132,7 +193,7 @@ fn run(
         }
     };
     let (text, code) = match command {
-        Command::Help { topic } => (help(topic).to_string(), EXIT_PASS),
+        Command::Help { topic } => (help(topic), EXIT_PASS),
         Command::Version { format } => (version(format), EXIT_PASS),
         Command::Rules { format } => {
             let json = quelda_core::list_rules_json();
@@ -157,7 +218,7 @@ fn run(
         }
         Command::Scan(s) => {
             let input = s.inputs.first().cloned().unwrap_or(args::Input::Stdin);
-            let verdict = scan::run(&s, &input, stdin);
+            let verdict = scan::run(&s, &input, stdin, err);
             let code = match verdict.status {
                 Status::Pass => EXIT_PASS,
                 Status::Reject => EXIT_REJECT,
@@ -186,12 +247,13 @@ fn run(
     }
 }
 
-fn help(topic: Option<&str>) -> &'static str {
+fn help(topic: Option<&str>) -> String {
     match topic {
-        Some("scan") => HELP_SCAN,
-        Some("rules") => HELP_RULES,
-        Some("version") => HELP_VERSION,
-        _ => HELP,
+        Some("scan") => HELP_SCAN.to_string(),
+        Some("rules") => HELP_RULES.to_string(),
+        Some("version") => HELP_VERSION.to_string(),
+        Some("policy") => HELP_POLICY.to_string(),
+        _ => HELP.replace("{version}", quelda_core::version()),
     }
 }
 
@@ -275,12 +337,83 @@ mod tests {
     #[test]
     fn help_goes_to_stdout() {
         let (code, out, err) = call(&["--help"], b"");
-        assert_eq!((code, out.as_str(), err.as_str()), (EXIT_PASS, HELP, ""));
+        assert_eq!(
+            (code, out.as_str(), err.as_str()),
+            (EXIT_PASS, help(None).as_str(), "")
+        );
+        let first = format!(
+            "quelda {} — PDF & Illustrator security scanner",
+            quelda_core::version()
+        );
+        assert_eq!(out.lines().next(), Some(first.as_str()));
+        assert_eq!(call(&["-h"], b"").1, out);
         let (_, out, _) = call(&["scan", "-h"], b"");
         assert_eq!(out, HELP_SCAN);
-        for (t, h) in [("rules", HELP_RULES), ("version", HELP_VERSION)] {
+        for (t, h) in [
+            ("rules", HELP_RULES),
+            ("version", HELP_VERSION),
+            ("policy", HELP_POLICY),
+        ] {
             assert_eq!(call(&["help", t], b"").1, h);
         }
+    }
+
+    #[test]
+    fn rule_flags_change_the_verdict_and_warn_about_locked_rules() {
+        const PS: &[u8] = b"%!PS-Adobe-3.0\n";
+        let status = |args: &[&str]| {
+            let (code, out, err) = call(args, PS);
+            let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+            let ids = |k: &str| -> Vec<String> {
+                let list = v[k].as_array().unwrap();
+                list.iter()
+                    .map(|f| f["rule_id"].as_str().unwrap().to_string())
+                    .collect()
+            };
+            (code, ids("violations"), ids("warnings"), err)
+        };
+        // A warning raised to block, and back off.
+        let (code, violations, _, err) =
+            status(&["scan", "-", "--rule", "STRUCT.MISSING_EOF=block"]);
+        assert_eq!(code, EXIT_REJECT);
+        assert!(
+            violations.contains(&"STRUCT.MISSING_EOF".to_string()),
+            "{violations:?}"
+        );
+        assert!(err.is_empty(), "{err}");
+        let (_, violations, warnings, _) = status(&["scan", "-", "--rule=STRUCT.MISSING_EOF=off"]);
+        assert!(
+            !violations
+                .iter()
+                .chain(&warnings)
+                .any(|r| r == "STRUCT.MISSING_EOF")
+        );
+        // A locked rule turned off: still blocks, and stderr says why.
+        let (code, violations, _, err) =
+            status(&["scan", "-", "--rule", "FILETYPE.POSTSCRIPT_MAGIC=off"]);
+        assert_eq!(code, EXIT_REJECT);
+        assert!(violations.contains(&"FILETYPE.POSTSCRIPT_MAGIC".to_string()));
+        assert_eq!(
+            err,
+            "quelda: warning: FILETYPE.POSTSCRIPT_MAGIC is locked and still blocks (lowering it needs \"unsafe_allow_unlock\": true in the policy)\n"
+        );
+        // Unlocked by the policy: no warning, the rule is lowered.
+        let (code, _, warnings, err) = status(&[
+            "scan",
+            "-",
+            "--policy-json",
+            r#"{"unsafe_allow_unlock":true}"#,
+            "--rule",
+            "FILETYPE.POSTSCRIPT_MAGIC=warn",
+            "--rule",
+            "FILETYPE.NOT_PDF_HEADER=off",
+        ]);
+        assert_eq!((code, err.as_str()), (EXIT_PASS, ""));
+        assert!(warnings.contains(&"FILETYPE.POSTSCRIPT_MAGIC".to_string()));
+        // An unknown rule ID is POLICY.INVALID, like in a policy file.
+        let (code, out, _) = call(&["scan", "-", "--rule", "STRUCT.MISSING_EOFF=off"], PS);
+        assert_eq!(code, EXIT_ERROR);
+        assert!(out.contains("unknown rule `STRUCT.MISSING_EOFF`"), "{out}");
     }
 
     #[test]

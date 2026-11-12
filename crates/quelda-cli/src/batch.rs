@@ -191,7 +191,10 @@ pub fn run(
 ) -> u8 {
     let started = Instant::now();
     let policy = match scan::policy(scan) {
-        Ok(p) => p,
+        Ok(p) => {
+            scan::warn_ignored_unlocks(&p, err);
+            p
+        }
         Err(e) => {
             let _ = writeln!(err, "quelda: {} (nothing scanned)", e.0);
             return EXIT_ERROR;
@@ -559,6 +562,7 @@ mod tests {
             inputs,
             policy: None,
             preset: None,
+            rules: Vec::new(),
             stop_on_first: false,
             format: None,
             all: false,
