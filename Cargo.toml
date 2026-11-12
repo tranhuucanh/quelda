@@ -9,7 +9,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT"
@@ -19,7 +19,7 @@ homepage = "https://github.com/tranhuucanh/quelda"
 description = "PDF & Illustrator security scanner: files + policy in, verdict out"
 
 [workspace.dependencies]
-quelda-core = { path = "crates/quelda-core", version = "0.2.0" }
+quelda-core = { path = "crates/quelda-core", version = "0.3.0" }
 
 # Test fixtures include >1 GiB Flate bombs; unoptimized deflate + Adler-32 make
 # generation ~8x slower in dev builds.
