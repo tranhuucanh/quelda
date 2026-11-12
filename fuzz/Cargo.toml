@@ -1,0 +1,50 @@
+[package]
+name = "quelda-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+license = "MIT"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+quelda-core = { path = "../crates/quelda-core" }
+serde_json = "1.0.154"
+
+# Not part of the main workspace: needs nightly and is never built by CI's
+# stable jobs.
+[workspace]
+members = ["."]
+
+[profile.release]
+debug = 1
+
+[[bin]]
+name = "lexer"
+path = "fuzz_targets/lexer.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "structure"
+path = "fuzz_targets/structure.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "filters"
+path = "fuzz_targets/filters.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "scan"
+path = "fuzz_targets/scan.rs"
+test = false
+doc = false
+bench = false
