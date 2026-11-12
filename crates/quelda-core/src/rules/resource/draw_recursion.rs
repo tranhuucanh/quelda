@@ -102,15 +102,6 @@ fn calls(ctx: &Ctx, object: usize) -> Calls {
     c
 }
 
-/// The values of key `name` in `d` (a name written in content).
-fn entry<'d>(d: &'d Dict, name: &Name) -> Vec<&'d PdfObject> {
-    d.entries()
-        .iter()
-        .filter(|(k, _)| k.as_bytes() == name.as_bytes())
-        .map(|(_, v)| v)
-        .collect()
-}
-
 /// Dictionaries `o` stands for (every definition).
 fn dicts<'c>(ctx: &'c Ctx, o: &'c PdfObject) -> Vec<&'c Dict> {
     ctx.resolve(o).filter_map(PdfObject::as_dict).collect()
@@ -137,6 +128,10 @@ struct Graph<'c, 'a> {
     /// Resource sets (each a list of resource dictionaries), interned.
     sets: Vec<Vec<&'c Dict>>,
     set_ids: HashMap<Vec<*const Dict>, usize>,
+    /// Keys of the dictionaries names are looked up in, indexed once:
+    /// scanning a dictionary for every call is cubic in forms that call
+    /// each other through one shared resource dictionary.
+    keys: HashMap<*const Dict, HashMap<&'c [u8], Vec<&'c PdfObject>>>,
 }
 
 impl<'c, 'a> Graph<'c, 'a> {
@@ -148,6 +143,29 @@ impl<'c, 'a> Graph<'c, 'a> {
         self.sets.push(set);
         self.set_ids.insert(key, self.sets.len() - 1);
         self.sets.len() - 1
+    }
+
+    /// The values of key `name` in `d` (a name written in content).
+    fn entry(&mut self, d: &'c Dict, name: &Name) -> Vec<&'c PdfObject> {
+        let keys = self.keys.entry(d as *const Dict).or_insert_with(|| {
+            let mut keys: HashMap<&'c [u8], Vec<&'c PdfObject>> = HashMap::new();
+            for (k, v) in d.entries() {
+                keys.entry(k.as_bytes()).or_default().push(v);
+            }
+            keys
+        });
+        keys.get(name.as_bytes()).cloned().unwrap_or_default()
+    }
+
+    /// The values `names` have under `key` in resource dictionary `r`.
+    fn called(&mut self, r: &'c Dict, key: &'static str, names: &[Name]) -> Vec<&'c PdfObject> {
+        let mut out = Vec::new();
+        for d in category(self.ctx, r, key) {
+            for n in names {
+                out.extend(self.entry(d, n));
+            }
+        }
+        out
     }
 
     /// The resources `d` sets with its own `/Resources`, if any.
@@ -180,19 +198,12 @@ impl<'c, 'a> Graph<'c, 'a> {
         let resources = self.sets[set].clone();
         let mut targets: Vec<(usize, usize)> = Vec::new();
         for r in resources {
-            let called = |key, names: &[Name]| -> Vec<&'c PdfObject> {
-                category(ctx, r, key)
-                    .into_iter()
-                    .flat_map(|d| names.iter().flat_map(move |n| entry(d, n)))
-                    .collect()
-            };
-            for v in called("XObject", &calls.xobjects)
-                .into_iter()
-                .chain(called("Pattern", &calls.patterns))
-            {
+            let drawn = self.called(r, "XObject", &calls.xobjects);
+            let painted = self.called(r, "Pattern", &calls.patterns);
+            for v in drawn.into_iter().chain(painted) {
                 targets.extend(streams(ctx, v).into_iter().map(|i| (i, set)));
             }
-            for gs in called("ExtGState", &calls.gstates) {
+            for gs in self.called(r, "ExtGState", &calls.gstates) {
                 for gs in dicts(ctx, gs) {
                     for mask in category(ctx, gs, "SMask") {
                         for g in mask.get_all("G") {
@@ -204,7 +215,7 @@ impl<'c, 'a> Graph<'c, 'a> {
             for d in category(ctx, r, "Font") {
                 for (n, codes) in &calls.text {
                     let fonts: Vec<&'c Dict> =
-                        entry(d, n).into_iter().flat_map(|v| dicts(ctx, v)).collect();
+                        self.entry(d, n).into_iter().flat_map(|v| dicts(ctx, v)).collect();
                     for font in fonts {
                         targets.extend(self.glyphs(font, codes, set));
                     }
@@ -255,7 +266,7 @@ impl<'c, 'a> Graph<'c, 'a> {
                     continue;
                 }
                 if let Some(n) = names.get(&c) {
-                    for v in entry(procs, n) {
+                    for v in self.entry(procs, n) {
                         out.extend(streams(ctx, v).into_iter().map(|i| (i, set)));
                     }
                 }
@@ -358,6 +369,7 @@ impl Rule for DrawRecursion {
             calls: HashMap::new(),
             sets: Vec::new(),
             set_ids: HashMap::new(),
+            keys: HashMap::new(),
         };
         // 1: on the current path, 2: done.
         let mut state: HashMap<(usize, usize), u8> = HashMap::new();
@@ -379,21 +391,22 @@ impl Rule for DrawRecursion {
                 };
                 *next += 1;
                 match state.get(&to) {
-                    Some(1) => {
+                    // Each object is described once: finding and printing
+                    // the loop for every back edge is cubic in forms that
+                    // call each other.
+                    Some(1) if reported.insert(to.0) => {
                         let at = path.iter().position(|(n, _, _)| *n == to).unwrap_or(0);
                         let ids: Vec<String> = path[at..]
                             .iter()
                             .chain(std::iter::once(&path[at]))
                             .map(|((o, _), _, _)| ctx.objects()[*o].id.to_string())
                             .collect();
-                        if reported.insert(to.0) {
-                            let e = &ctx.objects()[to.0];
-                            out.report(
-                                &META,
-                                &Location::of(to.0, e),
-                                Some(format!("drawing loop: {}", ids.join(" → "))),
-                            );
-                        }
+                        let e = &ctx.objects()[to.0];
+                        out.report(
+                            &META,
+                            &Location::of(to.0, e),
+                            Some(format!("drawing loop: {}", ids.join(" → "))),
+                        );
                     }
                     Some(_) => {}
                     None => {
@@ -532,5 +545,26 @@ mod tests {
         // `/Fm0 Do` in the page content: the page is not drawn by anything.
         let src = doc("<< /XObject << /Fm0 10 0 R >> >>", &stream(10, "/Subtype /Form", "0 0 1 1 re f"));
         assert!(hits(&src).is_empty());
+    }
+
+    #[test]
+    fn forms_that_all_call_each_other() {
+        // Found by fuzzing: the loop text was built for every back edge, and
+        // the shared dictionary was scanned for every call: cubic in the
+        // number of forms (1,600 forms: 36 s in release, now under 1 s).
+        const N: u32 = 600;
+        let names: String = (0..N).map(|i| format!("/Fm{i} {} 0 R ", 10 + i)).collect();
+        let calls: String = (0..N).map(|i| format!("/Fm{i} Do ")).collect();
+        let mut objects = format!("5 0 obj << /XObject << {names}>> >> endobj\n");
+        for i in 0..N {
+            objects += &stream(10 + i, "/Subtype /Form /Resources 5 0 R", &calls);
+        }
+        let src = doc("5 0 R", &objects);
+        let start = std::time::Instant::now();
+        let found = hits(&src);
+        let took = start.elapsed();
+        assert_eq!(found[0], "10 0: drawing loop: 10 0 → 10 0");
+        assert_eq!(found[1], "11 0: drawing loop: 11 0 → 11 0");
+        assert!(took.as_secs() < 5, "took {took:?}");
     }
 }
