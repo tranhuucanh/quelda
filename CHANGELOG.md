@@ -8,15 +8,17 @@ engine share one version.
 Rule IDs never change meaning or disappear. A new rule, or a rule that starts to
 match more files, is listed under **Rules** because it can change verdicts.
 
-## [Unreleased]
+## [0.4.0] — 2026-11-12
 
 ### Rules
 
-Measured on 7,076 real files (5,233 attack files from CIC-Evasive-PDFMal2022 and the PDF
-Insecurity collections, 1,828 ordinary files). With the default preset, ordinary files
-rejected by a rule's mistake went from 75 to 0, and attack files accepted from 342 to 239;
-no file lost a correct verdict in any preset. **Verdicts change**: files that 0.3.0 accepted
-with a warning can now be rejected.
+Measured on about 32,000 real files from public security research datasets
+(CIC-Evasive-PDFMal2022 and PDF Insecurity, malware, exploits and clean documents): 95.4 % of
+attack files rejected with the default preset (98.9 % in strict), and no clean file rejected
+by a rule's mistake (0.3.0 rejected some clean files by mistake and accepted more attacks);
+no file lost a correct verdict in any preset. On the real files we test with (147 files),
+no verdict changed. **Verdicts change**: files that 0.3.0 accepted with a warning can now be
+rejected.
 
 Three new rules (56 in all):
 
@@ -52,6 +54,11 @@ Rules that reject less:
   structure tags, some longer than 127 bytes.
 - `CODEC.ICC_MALFORMED`: no longer reports a missing `acsp` signature (see
   `CODEC.ICC_UNRECOGNIZED`).
+
+### Changed
+
+- README (GitHub and npm): a short summary first (browser and server, speed, results on real
+  attacks, modes), then the results on public research datasets, and an icon per section.
 
 ## [0.3.0] — 2026-11-12
 
